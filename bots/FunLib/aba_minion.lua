@@ -12,6 +12,7 @@ local Illusion = dofile(GetScriptDirectory()..'/FunLib/minion_lib/illusions')
 local MinionWithSkill = dofile(GetScriptDirectory()..'/FunLib/minion_lib/minion_with_skill')
 local VengefulSprit = dofile(GetScriptDirectory()..'/FunLib/minion_lib/vengeful_spirit')
 local Jugg = dofile(GetScriptDirectory()..'/FunLib/minion_lib/jugg')
+local Customize = require(GetScriptDirectory()..'/Customize/general')
 
 -- For now
 function X.IllusionThink(hMinionUnit)
@@ -30,7 +31,7 @@ end
 function X.MinionThink(hMinionUnit)
 	if not hMinionUnit or hMinionUnit:IsNull() or not hMinionUnit:IsAlive() then return end
 	if hMinionUnit.lastItemFrameProcessTime == nil then hMinionUnit.lastItemFrameProcessTime = 0 end
-	if DotaTime() - hMinionUnit.lastItemFrameProcessTime < 0.5 then return end
+	if DotaTime() - hMinionUnit.lastItemFrameProcessTime < 0.5 * (1 + Customize.ThinkLess) then return end
 	hMinionUnit.lastItemFrameProcessTime = DotaTime()
 
 	if bot == nil then bot = GetBot() end

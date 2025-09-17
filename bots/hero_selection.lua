@@ -1,41 +1,52 @@
+--==============================================================================
+--  DRAFTER — with per-team weak-hero cap + configurable
+--  penalty curve, matchup-aware selection, and strict ban/repeat policy.
+--
+--  Key guarantees:
+--    1) Prefer matchup-ranked heroes that are pickable (not banned, not above
+--       weak cap, not repeated unless allowed) AND inside the role's pool.
+--    2) If none from matchup list are pickable, randomly pick within pool
+--       under the same constraints.
+--    3) Repeats are allowed ONLY when Customize.Allow_Repeated_Heroes == true.
+--    4) Weak-hero cap is tracked per-team (Radiant/Dire) per game.
+--    5) Weak penalty curve during scoring is configurable in Customize.*
+--==============================================================================
+
 require( GetScriptDirectory()..'/FunLib/aba_global_overrides' )
 
 local X = {}
-local sSelectHero = "npc_dota_hero_zuus"
-local fLastSlectTime, fLastRand = 5, 0
-local nDelayTime = nil
+
+local PickSchedule = {
+	initialized = false,
+	NextPickAt = { [1]=math.huge,[2]=math.huge,[3]=math.huge,[4]=math.huge,[5]=math.huge },
+}
+
 local sBanList = {}
 local sSelectList = {}
 local tSelectPoolList = {}
 local tLaneAssignList = {}
 local bLineupReserve = false
 
-local MU = require( GetScriptDirectory()..'/FunLib/aba_matchups' )
+-- matchup data: matchups[cand][enemy] = enemy_advantage_vs_cand (Dotabuff-style)
+local matchups = require( GetScriptDirectory()..'/FretBots/matchups_data' )
+
 local Role = require( GetScriptDirectory()..'/FunLib/aba_role' )
 local Utils = require( GetScriptDirectory()..'/FunLib/utils' )
 local Dota2Teams = require( GetScriptDirectory()..'/FunLib/aba_team_names' )
-local CM = require( GetScriptDirectory()..'/FunLib/captain_mode' )
+local CaptainMode = require( GetScriptDirectory()..'/FunLib/captain_mode' )
 local Localization = require( GetScriptDirectory()..'/FunLib/localization' )
 local HeroPositionMap = require( GetScriptDirectory()..'/FunLib/aba_hero_pos_weights' )
 local heroUnitNames = require( GetScriptDirectory()..'/FretBots/HeroNames')
 local Customize = require(GetScriptDirectory()..'/FunLib/custom_loader')
 HeroPositionMap = HeroPositionMap.GetHeroPositions()
 
-local SupportedHeroes = {}
+if GAMEMODE_TURBO == nil then GAMEMODE_TURBO = 23 end
 
-local CorrectRadiantAssignedLanes = false
-local CorrectDireAssignedLanes = false
-local CorrectDirePlayerIndexToLaneIndex = { }
-
--- Define the upper bound threshold for considering a hero a good fit for a position
-local ROLE_WEIGHT_THRESHOLD = 50
--- Only pick the top k result of the heroes that have the heighest weight for the role.
-local ROLE_LIST_TOP_K_LIMIT = 35
-
-local CountCounterPicks = 0
-
+--==============================================================================
+-- Game Modes notes
+--==============================================================================
 --[[
-Game Modes
+
 [x]: to be added.
 
 GAMEMODE_NONE
@@ -56,41 +67,88 @@ GAMEMODE_TURBO = 23
 
 ]]
 
+--==============================================================================
+-- Configuration (can be overridden in Customize)
+--==============================================================================
+
+-- Upper bound threshold for considering a hero a good fit for a position
+local ROLE_WEIGHT_THRESHOLD = 50
+-- Only pick top-k by role weight when building the pool
+local ROLE_LIST_TOP_K_LIMIT = 35
+
+-- Default weak-hero cap per-team (can override via Customize.Weak_Hero_Cap)
+local DEFAULT_WEAK_HERO_CAP = 1
+
+-- Default weak penalty curve. Can override via Customize.Weak_Penalty:
+--   { type="linear", k=0.25 }         ->  penalty = max(0, 1 - k * (weakPicked/cap))
+--   { type="quad",   k=1.0 }          ->  penalty = (1 - min(1, weakPicked/cap))^2
+--   { type="exp",    base=0.6 }       ->  penalty = base^(weakPicked)  (more weak -> smaller)
+-- Missing params fall back to sensible defaults.
+local DEFAULT_WEAK_PENALTY = { type = "exp", base = 0.6 }
+
+--==============================================================================
+-- State
+--==============================================================================
+
+local SupportedHeroes = {}
+
+local CorrectRadiantAssignedLanes = false
+local CorrectDireAssignedLanes = false
+local CorrectDirePlayerIndexToLaneIndex = { }
+
+-- Track how many "durable" etc. have been allowed per role during pool build
+local countDurableHeroes = {}
+
+-- Per-team, per-game weak-hero counter (hard cap enforcement)
+local WeakHeroCount = {
+	[TEAM_RADIANT] = 0,
+	[TEAM_DIRE]    = 0
+}
+
+--==============================================================================
+-- Weak & Buggy hero lists (tunable)
+--   Note: They're still eligible, but we throttle picks and score-penalize.
+--==============================================================================
+
 -- A list of to be improved heroes. They maybe selected for bots, but shouldn't have more than one in a team to ensure the bar of gaming experience for human players.
 -- Weak due to 1, some have bugs from Valve side, I try my best to improve. 2, I'm not familir with the hero game play itself, or it's not easy hero in terms of do it with coding.
-local SelectedWeakHero = 0
-local MaxWeakHeroCount = 1
 local WeakHeroes = {
 	-- Weaks, meaning they are too far from being able to apply their power:
 	'npc_dota_hero_chen',
-	-- 'npc_dota_hero_keeper_of_the_light',
-	-- 'npc_dota_hero_winter_wyvern', -- somewhat improved
 	'npc_dota_hero_ancient_apparition',
-	-- 'npc_dota_hero_phoenix', -- somewhat improved
 	'npc_dota_hero_tinker',
 	'npc_dota_hero_pangolier',
-	-- 'npc_dota_hero_furion',
 	'npc_dota_hero_tusk',
 	'npc_dota_hero_morphling',
 	'npc_dota_hero_visage',
 	'npc_dota_hero_void_spirit',
-	-- 'npc_dota_hero_pudge',
 	'npc_dota_hero_ember_spirit',
+	'npc_dota_hero_rubick',
+	'npc_dota_hero_brewmaster',
 
-	-- Buggys, meaning they have bugs on Valves side, as of (still) 2024/8/1:
-    -- 'npc_dota_hero_muerta',
+	-- Buggys (as of 2024/8/1):
     'npc_dota_hero_marci',
     'npc_dota_hero_lone_druid',
     'npc_dota_hero_primal_beast',
     'npc_dota_hero_dark_willow',
-    -- 'npc_dota_hero_elder_titan',
     'npc_dota_hero_hoodwink',
     'npc_dota_hero_wisp',
-	-- 'npc_dota_hero_kez', -- somewhat improved
 }
 
--- Function to get a list of all hero names from the HeroPositionMap
-function GetAllHeroNames(heroPosMap)
+--==============================================================================
+-- Helpers: global options
+--==============================================================================
+
+if Customize and not Customize.Enable then Customize = nil end
+
+-- Per-team string name for Role.RoleAssignment keying
+local sTeamName = GetTeam() == TEAM_RADIANT and 'TEAM_RADIANT' or 'TEAM_DIRE'
+
+--==============================================================================
+-- Role-pool construction helpers
+--==============================================================================
+
+local function GetAllHeroNames(heroPosMap)
     local heroNames = {}
     for heroName, _ in pairs(heroPosMap) do
         table.insert(heroNames, heroName)
@@ -98,27 +156,38 @@ function GetAllHeroNames(heroPosMap)
     return heroNames
 end
 
-local countDurableHeroes = {}
--- Function to get a list of heroes suitable for a given position. Sort the list by weight。
-function GetPositionedPool(heroPosMap, position)
+local function ShouldPickDurableOrOtherCores(name, position, minCount)
+	return (countDurableHeroes[position] <= minCount and Role.IsDurable(name))
+	       or (Role.IsDisabler(name) or Role.IsNuker(name))
+end
+
+local function ShouldPickDurableOrOtherInitiator(name, position, minCount)
+	return (countDurableHeroes[position] <= minCount and Role.IsDurable(name))
+	       or (Role.IsInitiator(name) or (Role.IsDisabler(name) and Role.IsDurable(name)))
+end
+
+local function ShouldPickDurableOrOtherSupports(name, position, minCount)
+	return (countDurableHeroes[position] <= minCount and Role.IsDurable(name))
+	       or (Role.IsDisabler(name) or Role.IsHealer(name) or Role.IsInitiator(name))
+end
+
+-- Build a weighted/screened list for a position, then cut to top-k
+local function GetPositionedPool(heroPosMap, position)
     local heroList = {}
 	-- Pick from weighted options for the pos first.
     for heroName, roleWeights in pairs(heroPosMap) do
         local weight = roleWeights[position]
         if weight > RandomInt(5, ROLE_WEIGHT_THRESHOLD) then
-			if not Utils.HasValue(WeakHeroes, heroName)
-			or RandomInt(1, 10) > 7 then
+			if not Utils.HasValue(WeakHeroes, heroName) or RandomInt(1, 10) > 7 then
 				table.insert(heroList, {name = heroName, weight = weight})
 			end
         end
     end
-    -- Sort the list by weight in descending order
     table.sort(heroList, function(a, b) return a.weight > b.weight end)
-    -- Extract hero names
+
     local sortedHeroNames = {}
     for _, hero in ipairs(heroList) do
 		local name = hero.name
-		print('Picking for position: '.. tostring(position) .. ", checking role for hero: "..name)
 		if countDurableHeroes[position] == nil then countDurableHeroes[position] = 0 end
 		if (position == 1 and ShouldPickDurableOrOtherCores(name, position, 6))
 		or (position == 2 and ShouldPickDurableOrOtherCores(name, position, 6))
@@ -126,38 +195,26 @@ function GetPositionedPool(heroPosMap, position)
 		or (position == 4 and Role.IsSupport(name) and ShouldPickDurableOrOtherSupports(name, position, 4))
 		or (position == 5 and Role.IsSupport(name) and (Role.IsRanged(name) or hero.weight >= 60) and (Role.IsDisabler(name) or Role.IsHealer(name) or Role.IsInitiator(name)))
 		then
-			print("Selected hero: " ..name .. " as an option for position: ".. tostring(position))
 			table.insert(sortedHeroNames, name)
 			countDurableHeroes[position] = countDurableHeroes[position] + 1
-			-- Only return top k (ROLE_LIST_TOP_K_LIMIT) results.
 			if #sortedHeroNames >= ROLE_LIST_TOP_K_LIMIT then
 				return sortedHeroNames
 			end
 		end
     end
-	if #sortedHeroNames < 6 then -- in case all selections is unavailable or have been picked.
+
+	-- In case pool is small (rare), re-merge another pass
+	if #sortedHeroNames < 6 then
 		sortedHeroNames = Utils.CombineTablesUnique(sortedHeroNames, GetPositionedPool(heroPosMap, position))
 	end
-	print("For position: " .. position .. ", pool size count: ".. #sortedHeroNames)
-	Utils.PrintTable(sortedHeroNames)
     return sortedHeroNames
 end
 
-function ShouldPickDurableOrOtherCores(name, position, minCount)
-	return (countDurableHeroes[position] <= minCount and Role.IsDurable(name)) or (Role.IsDisabler(name) or Role.IsNuker(name))
-end
-
-function ShouldPickDurableOrOtherInitiator(name, position, minCount)
-	return (countDurableHeroes[position] <= minCount and Role.IsDurable(name)) or (Role.IsInitiator(name) or (Role.IsDisabler(name) and Role.IsDurable(name)))
-end
-
-function ShouldPickDurableOrOtherSupports(name, position, minCount)
-	return (countDurableHeroes[position] <= minCount and Role.IsDurable(name)) or (Role.IsDisabler(name) or Role.IsHealer(name) or Role.IsInitiator(name))
-end
+--==============================================================================
+-- Setup supported heroes & initial pools
+--==============================================================================
 
 SupportedHeroes = GetAllHeroNames(HeroPositionMap)
-
-if Customize and not Customize.Enable then Customize = nil end
 
 tSelectPoolList = {
 	[1] = GetPositionedPool(HeroPositionMap, 1),
@@ -175,6 +232,10 @@ sSelectList = {
 	[5] = tSelectPoolList[5][RandomInt( 1, #tSelectPoolList[5] )],
 }
 
+--==============================================================================
+-- Default lane mapping scaffolding
+--==============================================================================
+
 local tDefaultLaningRadiant = {
 	[1] = LANE_BOT,
 	[2] = LANE_MID,
@@ -191,25 +252,16 @@ local tDefaultLaningDire = {
 }
 
 tLaneAssignList = {
-	-- 天辉夜宴的上下路相反
 	TEAM_RADIANT = Utils.Deepcopy(tDefaultLaningRadiant),
-	TEAM_DIRE = Utils.Deepcopy(tDefaultLaningDire)
+	TEAM_DIRE    = Utils.Deepcopy(tDefaultLaningDire)
 }
 
-local MidOnlyLaneAssignment = {
-	[1] = LANE_MID,
-	[2] = LANE_MID,
-	[3] = LANE_MID,
-	[4] = LANE_MID,
-	[5] = LANE_MID,
-}
-local OneVoneLaneAssignment = {
-	[1] = LANE_MID,
-	[2] = LANE_TOP,
-	[3] = LANE_TOP,
-	[4] = LANE_TOP,
-	[5] = LANE_TOP,
-};
+local MidOnlyLaneAssignment = { [1]=LANE_MID,[2]=LANE_MID,[3]=LANE_MID,[4]=LANE_MID,[5]=LANE_MID }
+local OneVoneLaneAssignment = { [1]=LANE_MID,[2]=LANE_TOP,[3]=LANE_TOP,[4]=LANE_TOP,[5]=LANE_TOP }
+
+--==============================================================================
+-- Customize overrides (preset picks)
+--==============================================================================
 
 if Customize then
 	if GetTeam() == TEAM_RADIANT and Customize.Radiant_Heros then
@@ -229,11 +281,12 @@ if Customize then
 	end
 end
 
-function X.IsInCustomizedPicks(name)
-	if not Customize then
-		return false
-	end
+--==============================================================================
+-- Utility: customization checks & shuffles
+--==============================================================================
 
+function X.IsInCustomizedPicks(name)
+	if not Customize then return false end
 	local heroes = {}
 	if GetTeam() == TEAM_RADIANT and Customize.Radiant_Heros then
 		heroes = Customize.Radiant_Heros
@@ -244,121 +297,35 @@ function X.IsInCustomizedPicks(name)
 end
 
 function X.ShuffleArray(array)
-	if type(array) ~= "table" then
-        error("Expected a table, got " .. type(array))
-    end
-
+	if type(array) ~= "table" then error("Expected a table, got " .. type(array)) end
     local n = #array
     for i = n, 2, -1 do
         local j = RandomInt(1, i)
-        array[i], array[j] = array[j], array[i]  -- Swap elements
+        array[i], array[j] = array[j], array[i]
     end
     return array
 end
 
 function X.ShufflePickOrder(teamPlayers)
 	local shuffleSelection = X.ShuffleArray({1, 2, 3, 4, 5})
-	-- print('Random pick order: '..table.concat(shuffleSelection, ", "))
 	for i = 1, #shuffleSelection do
 		local targetIndex = shuffleSelection[i]
 		if teamPlayers[i] and teamPlayers[i] >= 0 and IsPlayerBot(teamPlayers[i]) and IsPlayerBot(teamPlayers[targetIndex]) then
-			-- print('Shuffle team '..GetTeam()..', swap '..i.." with "..targetIndex)
 			sSelectList[i], sSelectList[targetIndex] = sSelectList[targetIndex], sSelectList[i]
 			tSelectPoolList[i], tSelectPoolList[targetIndex] = tSelectPoolList[targetIndex], tSelectPoolList[i]
 			tLaneAssignList['TEAM_RADIANT'][i], tLaneAssignList['TEAM_RADIANT'][targetIndex] = tLaneAssignList['TEAM_RADIANT'][targetIndex], tLaneAssignList['TEAM_RADIANT'][i]
-			tLaneAssignList['TEAM_DIRE'][i], tLaneAssignList['TEAM_DIRE'][targetIndex] = tLaneAssignList['TEAM_DIRE'][targetIndex], tLaneAssignList['TEAM_DIRE'][i]
+			tLaneAssignList['TEAM_DIRE'][i],    tLaneAssignList['TEAM_DIRE'][targetIndex]    = tLaneAssignList['TEAM_DIRE'][targetIndex],    tLaneAssignList['TEAM_DIRE'][i]
 			Role.RoleAssignment['TEAM_RADIANT'][i], Role.RoleAssignment['TEAM_RADIANT'][targetIndex] = Role.RoleAssignment['TEAM_RADIANT'][targetIndex], Role.RoleAssignment['TEAM_RADIANT'][i]
-			Role.RoleAssignment['TEAM_DIRE'][i], Role.RoleAssignment['TEAM_DIRE'][targetIndex] = Role.RoleAssignment['TEAM_DIRE'][targetIndex], Role.RoleAssignment['TEAM_DIRE'][i]
+			Role.RoleAssignment['TEAM_DIRE'][i],    Role.RoleAssignment['TEAM_DIRE'][targetIndex]    = Role.RoleAssignment['TEAM_DIRE'][targetIndex],    Role.RoleAssignment['TEAM_DIRE'][i]
 		end
 	end
 end
 
-function X.IsHumanNotReady( nTeam )
+--==============================================================================
+-- Ban List plumbing
+--==============================================================================
 
-	if GameTime() > 20 or bLineupReserve then return false end
-
-	local humanCount, readyCount = 0, 0
-	local nIDs = GetTeamPlayers( nTeam )
-	for i, id in pairs( nIDs )
-	do
-        if not IsPlayerBot( id )
-		then
-			humanCount = humanCount + 1
-			if GetSelectedHeroName( id ) ~= ""
-			then
-				readyCount = readyCount + 1
-			end
-		end
-    end
-
-	if( readyCount >= humanCount )
-	then
-		return false
-	end
-
-	return true
-end
-
-function X.GetNotRepeatHero( nTable )
-
-	local sHero = nTable[1]
-	local maxCount = #nTable
-	local nRand = 0
-	local bRepeated = false
-
-	for count = 1, maxCount
-	do
-		nRand = RandomInt( 1, #nTable )
-		sHero = nTable[nRand]
-		bRepeated = false
-		for id = 0, 20
-		do
-			if ( IsTeamPlayer( id ) and GetSelectedHeroName( id ) == sHero )
-				or ( X.IsBannedHero( sHero ) )
-				or ( X.SkipPickingWeakHeroes(sHero) )
-			then
-				bRepeated = true
-				table.remove( nTable, nRand )
-				break
-			end
-		end
-		if not bRepeated then break end
-	end
-
-	return sHero
-end
-
-function X.IsRepeatHero( sHero )
-	if Customize and Customize.Allow_Repeated_Heroes then
-		return false
-	end
-
-	for id = 0, 20
-	do
-		local heroExist = IsTeamPlayer( id ) and GetSelectedHeroName( id ) == sHero
-		if heroExist
-			or ( X.IsBannedHero( sHero ) )
-			or ( X.SkipPickingWeakHeroes(sHero) and not (X.IsInCustomizedPicks(sHero) and not heroExist) )
-		then
-			return true
-		end
-	end
-
-	return false
-end
-
--- limit the number and chance the weak heroes can be picked.
-function X.SkipPickingWeakHeroes(sHero)
-	if Customize and Customize.Allow_Repeated_Heroes then
-		return false
-	end
-
-	return Utils.HasValue(WeakHeroes, sHero)
-	and SelectedWeakHero >= MaxWeakHeroCount
-end
-
-if Customize and Customize.Ban
-then
+if Customize and Customize.Ban then
 	sBanList = Customize.Ban
 end
 
@@ -366,37 +333,179 @@ function X.SetChatHeroBan( sChatText )
 	sBanList[#sBanList + 1] = string.lower( sChatText )
 end
 
+-- Safer bans: exact match on unit-name by default; optional guarded substring
 function X.IsBannedHero( sHero )
+	if not sHero then return true end
 
-	if not sHero then
+	-- CM bans enforced by engine
+	if (GetGameMode() == GAMEMODE_CM or GetGameMode() == GAMEMODE_REVERSE_CM) and IsCMBannedHero(sHero) then
 		return true
 	end
 
-	if (GetGameMode() == GAMEMODE_CM or GetGameMode() == GAMEMODE_REVERSE_CM)and IsCMBannedHero(sHero) then
-		return true
+	local strict = true
+	if Customize and Customize.Strict_Ban_Match ~= nil then
+		strict = Customize.Strict_Ban_Match
 	end
 
-	for i = 1, #sBanList
-	do
-		if sBanList[i] ~= nil
-		   and string.find( sHero, Utils.TrimString(sBanList[i]) )
-		then
-			return true
+	for i = 1, #sBanList do
+		local ban = sBanList[i]
+		if ban ~= nil then
+			ban = Utils.TrimString(string.lower(ban))
+			if string.lower(sHero) == ban then
+				return true
+			end
+			if not strict then
+				-- only allow fuzzy if ban token is reasonably long to avoid false positives
+				if #ban >= 6 and string.find(string.lower(sHero), ban, 1, true) then
+					return true
+				end
+			end
 		end
 	end
-
 	return false
 end
 
-local sTeamName = GetTeam() == TEAM_RADIANT and 'TEAM_RADIANT' or 'TEAM_DIRE'
+--==============================================================================
+-- Per-team Weak-Hero Cap & Penalty
+--==============================================================================
+
+-- Returns per-team weak cap
+local function GetWeakCapForTeam(team)
+	if Customize and Customize.Weak_Hero_Cap ~= nil then
+		return tonumber(Customize.Weak_Hero_Cap) or DEFAULT_WEAK_HERO_CAP
+	end
+	return DEFAULT_WEAK_HERO_CAP
+end
+
+-- Returns multiplicative score penalty given how many weak heroes already on team
+--  1.0 = no penalty; 0.0 = completely exclude (we never set to zero; CanPickHero blocks by cap)
+local function WeakPenaltyFactor(team)
+	local cfg = (Customize and Customize.Weak_Penalty) or DEFAULT_WEAK_PENALTY
+	local picked = WeakHeroCount[team] or 0
+	local cap = math.max(1, GetWeakCapForTeam(team))  -- avoid divide by zero
+
+	-- Normalize 0..1
+	local ratio = math.min(1.0, picked / cap)
+
+	if cfg.type == "linear" then
+		local k = (cfg.k ~= nil and tonumber(cfg.k)) or 0.25
+		local p = 1.0 - (k * ratio)
+		if p < 0 then p = 0 end
+		return p
+
+	elseif cfg.type == "quad" then
+		-- More aggressive near cap
+		local k = (cfg.k ~= nil and tonumber(cfg.k)) or 1.0
+		local p = (1.0 - ratio) ^ 2
+		return p * k + (1.0 - k)  -- allow scaling if k != 1
+
+	elseif cfg.type == "exp" then
+		-- Simple exponential decay by count (ignores cap)
+		local base = (cfg.base ~= nil and tonumber(cfg.base)) or 0.6
+		if base < 0.05 then base = 0.05 end
+		if base > 0.99 then base = 0.99 end
+		return base ^ picked
+	end
+
+	-- Default (exp-like)
+	return DEFAULT_WEAK_PENALTY.base ^ picked
+end
+
+--==============================================================================
+-- Pickability policy (centralized)
+--==============================================================================
+
+local function AlreadyPickedOnTeam(sHero)
+	for id = 0, 20 do
+		if IsTeamPlayer(id) and GetSelectedHeroName(id) == sHero then
+			return true
+		end
+	end
+	return false
+end
+
+-- Should we *block* picking a weak hero due to cap?
+local function IsWeakHeroOverCap(team, sHero)
+	if not Utils.HasValue(WeakHeroes, sHero) then return false end
+	return WeakHeroCount[team] >= GetWeakCapForTeam(team)
+end
+
+-- Single source of truth whether a hero can be picked *right now* by this team
+function X.CanPickHero(team, sHero)
+	if not sHero then return false end
+
+	-- Bans always block
+	if X.IsBannedHero(sHero) then return false end
+
+	-- Weak cap enforcement per team
+	if IsWeakHeroOverCap(team, sHero) then return false end
+
+	-- Repeats policy
+	if Customize and Customize.Allow_Repeated_Heroes then
+		return true
+	end
+	-- Otherwise, no duplicates within the team
+	return not AlreadyPickedOnTeam(sHero)
+end
+
+-- Random pick within a role pool under the policy above
+function X.GetRandomAvailableHero(team, pool)
+	if type(pool) ~= "table" or #pool == 0 then return nil end
+	local copy = {}
+	for i = 1, #pool do copy[i] = pool[i] end
+	X.ShuffleArray(copy)
+	for _, cand in ipairs(copy) do
+		if X.CanPickHero(team, cand) then
+			return cand
+		end
+	end
+	return nil
+end
+
+-- Backwards-compat wrapper; avoid using this in new code
+function X.GetNotRepeatHero(nTable)
+	if type(nTable) ~= "table" or #nTable == 0 then return nil end
+	local pick = X.GetRandomAvailableHero(GetTeam(), nTable)
+	return pick or nTable[1]
+end
+
+-- Kept for compatibility when code checks "repeatness" only
+function X.IsRepeatHero(sHero)
+	if Customize and Customize.Allow_Repeated_Heroes then
+		return false
+	end
+	return AlreadyPickedOnTeam(sHero)
+end
+
+-- Skip weak heroes only if over cap (policy uses CanPickHero anyway)
+function X.SkipPickingWeakHeroes(sHero)
+	-- If repeats allowed, we still enforce weak cap
+	return IsWeakHeroOverCap(GetTeam(), sHero)
+end
+
+--==============================================================================
+-- Team snapshots & lane utilities
+--==============================================================================
+
+function X.IsHumanNotReady( nTeam )
+	if GameTime() > 20 or bLineupReserve then return false end
+	local humanCount, readyCount = 0, 0
+	for _, id in pairs( GetTeamPlayers( nTeam ) ) do
+        if not IsPlayerBot( id ) then
+			humanCount = humanCount + 1
+			if GetSelectedHeroName( id ) ~= "" then
+				readyCount = readyCount + 1
+			end
+		end
+    end
+	return readyCount < humanCount
+end
 
 function X.GetCurrentTeam(nTeam, bEnemy)
 	local nHeroList = {}
-	for i, id in pairs(GetTeamPlayers(nTeam))
-	do
+	for i, id in pairs(GetTeamPlayers(nTeam)) do
 		local hName = GetSelectedHeroName(id)
-		if hName ~= nil and hName ~= ''
-		then
+		if hName ~= nil and hName ~= '' then
 			if bEnemy then
 				table.insert(nHeroList, {name=hName, pos=Role.GetBestEffortSuitableRole(hName)})
 			else
@@ -404,73 +513,12 @@ function X.GetCurrentTeam(nTeam, bEnemy)
 			end
 		end
 	end
-
 	return nHeroList
 end
 
-function X.GetBestHeroFromPool(i, nTeamList)
-	local sBestHero = ''
-	local nHeroes = {}
+local ShuffledPickOrder = { TEAM_RADIANT = false, TEAM_DIRE = false }
 
-	for j = 1, #nTeamList
-	do
-		local hName = nTeamList[j].name
-		for _, sName in pairs(tSelectPoolList[i])
-		do
-			if (MU.IsSynergy(hName, sName) or MU.IsSynergy(sName, hName))
-			and not X.IsRepeatHero(sName)
-			then
-				if nHeroes[sName] == nil then nHeroes[sName] = {} end
-				if nHeroes[sName]['count'] == nil then nHeroes[sName]['count'] = 1 end
-				nHeroes[sName]['count'] = nHeroes[sName]['count'] + 1
-			end
-		end
-	end
-
-	local c = -1
-	for k1, v1 in pairs(nHeroes)
-	do
-		for k2, v2 in pairs(nHeroes[k1])
-		do
-			if not X.IsRepeatHero(k1)
-			then
-				if v2 > 0 and c > 0 and v2 == c
-				and RandomInt(1, 2) == 1
-				then
-					sBestHero = k1
-				end
-
-				if v2 > c
-				then
-					c = v2
-					sBestHero = k1
-				end
-			end
-		end
-	end
-
-	return sBestHero
-end
-
-function X.GetCurrEnmCores(nEnmTeam)
-	local nCurrCores = {}
-	for i = 1, #nEnmTeam
-	do
-		if nEnmTeam[i].pos >= 1 and nEnmTeam[i].pos <= 2
-		then
-			table.insert(nCurrCores, nEnmTeam[i].name)
-		end
-	end
-
-	return nCurrCores
-end
-
-local ShuffledPickOrder = {
-	TEAM_RADIANT = false,
-	TEAM_DIRE = false,
-}
-
-function CorrectPotentialLaneAssignment()
+local function CorrectPotentialLaneAssignment()
 	if GetTeam() == TEAM_RADIANT and not CorrectRadiantAssignedLanes then
 		for i, id in pairs( GetTeamPlayers(TEAM_RADIANT) ) do
 			local role = Role.RoleAssignment['TEAM_RADIANT'][i]
@@ -478,7 +526,7 @@ function CorrectPotentialLaneAssignment()
 		end
 		CorrectRadiantAssignedLanes = true
 	elseif GetTeam() == TEAM_DIRE and not CorrectDireAssignedLanes then
-		-- lazy assignment, all humen on top of the list, bots on bottom.
+		-- Put humans first
 		local index = 1
 		for i, id in pairs( GetTeamPlayers(TEAM_DIRE) ) do
 			local role = Role.RoleAssignment['TEAM_DIRE'][i]
@@ -500,145 +548,229 @@ function CorrectPotentialLaneAssignment()
 	end
 end
 
-function AllPickHeros()
+-- Enemy hero unit-name list
+local function GetEnemyHeroNames()
+    local enemies = {}
+    for _, id in pairs(GetTeamPlayers(GetOpposingTeam())) do
+        local h = GetSelectedHeroName(id)
+        if h ~= nil and h ~= '' then table.insert(enemies, h) end
+    end
+    return enemies
+end
+
+--==============================================================================
+-- Draft core (AllPick)
+--==============================================================================
+
+local RemainingPos = {
+	TEAM_RADIANT = {'1', '2', '3', '4', '5'},
+	TEAM_DIRE    = {'1', '2', '3', '4', '5'},
+}
+
+local function CountWeakHeroesSelectedOnTeam(team)
+	local cnt = 0
+	for _, id in pairs(GetTeamPlayers(team)) do
+		local h = GetSelectedHeroName(id)
+		if h and h ~= '' and Utils.HasValue(WeakHeroes, h) then
+			cnt = cnt + 1
+		end
+	end
+	return cnt
+end
+
+local function TeamOfPlayer(id)
+	return GetTeamForPlayer(id) -- returns TEAM_RADIANT/TEAM_DIRE for that player
+end
+
+local function ScoreCandidatesForTeam(team, rolePool, enemyNames)
+	-- Build scored list among pickable heroes only
+	local list = {}
+	local weakPenalty = WeakPenaltyFactor(team)
+
+	for _, cand in ipairs(rolePool) do
+		if X.CanPickHero(team, cand) then
+			local score = 0
+			-- Sum counter advantages (negate enemy advantage)
+			if matchups[cand] then
+				for _, e in ipairs(enemyNames) do
+					local adv = matchups[cand][e]
+					if adv ~= nil then
+						score = score + (-1 * adv)
+					end
+				end
+			end
+
+			-- Penalize weak heroes multiplicatively (soft), in addition to hard cap
+			if Utils.HasValue(WeakHeroes, cand) then
+				score = score * weakPenalty
+			end
+
+			table.insert(list, { name = cand, score = score })
+		end
+	end
+
+	table.sort(list, function(a, b) return a.score > b.score end)
+	return list
+end
+
+local function SelectTopWithFuzz(scored)
+	-- Keep only top 3 and roll among them 50/25/25
+	while #scored > 3 do table.remove(scored) end
+	if #scored == 0 then return nil end
+
+	local roll = RandomInt(0, 100) / 100.0
+	if roll <= 0.50 then
+		return scored[1].name
+	elseif roll <= 0.75 and scored[2] then
+		return scored[2].name
+	elseif scored[3] then
+		return scored[3].name
+	else
+		return scored[1].name
+	end
+end
+
+local function PickHeroForBotSlot(i, id)
+	local team = TeamOfPlayer(id)
+	local rolePool = tSelectPoolList[i]
+	local preselect = sSelectList[i]
+
+	-- Default to preselect for variety path; can be overridden below
+	local pick = preselect
+
+	-- Use matchup data most of the time unless user forced picks
+	if not X.IsInCustomizedPicks(preselect) and RandomInt(1, 5) >= 1 then
+		local enemyNames = GetEnemyHeroNames()
+		local scored = ScoreCandidatesForTeam(team, rolePool, enemyNames)
+
+		local teamName = (team == TEAM_RADIANT and 'Radiant' or 'Dire')
+		print('==== top 3 heroes for team: '..teamName..' slot: '..i..' id: '..id..' ====')
+		for k = 1, math.min(3, #scored) do
+			print(k, scored[k].score, scored[k].name)
+		end
+
+		pick = SelectTopWithFuzz(scored)
+
+		-- Fallback: if none are pickable (due to bans/repeats/weakcap), random available
+		if not pick then
+			pick = X.GetRandomAvailableHero(team, rolePool) or preselect
+		end
+	end
+
+	-- Final safety: ensure policy still holds (e.g., late ban added)
+	if not X.CanPickHero(team, pick) then
+		pick = X.GetRandomAvailableHero(team, rolePool) or preselect
+	end
+
+	-- Update per-team weak count if needed
+	if Utils.HasValue(WeakHeroes, pick) then
+		-- Refresh live count (defensive) and then increment by pick
+		WeakHeroCount[team] = CountWeakHeroesSelectedOnTeam(team)
+		WeakHeroCount[team] = WeakHeroCount[team] + 1
+	end
+
+	return pick
+end
+
+local function AllPickHeros()
 	local teamPlayers = GetTeamPlayers(GetTeam(), true)
 
+	-- Shuffle internal pick order when all-bot team to mix patterns
 	if not ShuffledPickOrder[sTeamName] and not Utils.IsHumanPlayerInTeam(GetTeam()) then
 		X.ShufflePickOrder(teamPlayers)
 		ShuffledPickOrder[sTeamName] = true
 	end
 
-	local nOwnTeam = X.GetCurrentTeam(GetTeam(), false)
-	local nEnmTeam = X.GetCurrentTeam(GetOpposingTeam(), true)
-
-	for i, id in pairs( teamPlayers )
-	do
-		if IsPlayerBot( id ) and GetSelectedHeroName( id ) == "" and GameTime() >= fLastSlectTime + GetTeam() * 2
+	for i, id in pairs(teamPlayers) do
+		-- Only pick when: this is a bot, slot is unpicked, and its scheduled time has arrived.
+		if IsPlayerBot(id) and GetSelectedHeroName(id) == ""
+		and IsPlayerInHeroSelectionControl(id)
+		and GameTime() >= (PickSchedule.NextPickAt[i] or math.huge)
 		then
-			sSelectHero = sSelectList[i]
+			local finalPick = PickHeroForBotSlot(i, id)
+			SelectHero(id, finalPick)
 
-			-- Give a chance to pick counter/synergy heroes
-			if not X.IsInCustomizedPicks(sSelectHero) and RandomInt(1, 5) >= 3 then
-				local nCurrEnmCores = X.GetCurrEnmCores(nEnmTeam)
-				local selectCounter = nil
-
-				-- Pick a random core in the current enemy comp to counter
-				local nHeroToCounter = nCurrEnmCores[RandomInt(1, #nCurrEnmCores)]
-
-				for j = 1, #tSelectPoolList[i], 1
-				do
-					local idx = RandomInt(1, #tSelectPoolList[i])
-					local heroName = tSelectPoolList[i][idx]
-					if not X.IsRepeatHero(heroName)
-					and MU.IsCounter(heroName, nHeroToCounter) -- so it's not 'samey'; since bots don't really put pressure like a human would
-					then
-						print('Team '..GetTeam()..'. Counter pick. ', 'Selected: '..heroName, ' to counter: '..nHeroToCounter)
-						selectCounter = heroName
-						break
-					end
-				end
-
-				if CountCounterPicks < 2
-				and selectCounter ~= nil then
-					sSelectHero = selectCounter
-					CountCounterPicks = CountCounterPicks + 1
-				else
-					local synergy = X.GetBestHeroFromPool(i, nOwnTeam)
-					if synergy ~= '' and synergy ~= nil then
-						print('Team '..GetTeam()..'. Synergy pick. ', 'Selected: '..synergy)
-						sSelectHero = synergy
-					end
-				end
-			else
-				-- print('Team '..GetTeam()..'. Skip picking counter/synergy heroes. For more chance to see any heroes')
-			end
-
-			if X.IsRepeatHero(sSelectHero) then sSelectHero = X.GetNotRepeatHero( tSelectPoolList[i] ) end
-			if Utils.HasValue(WeakHeroes, sSelectHero) then SelectedWeakHero = SelectedWeakHero + 1 end
-			SelectHero( id, sSelectHero )
-
-			fLastSlectTime = GameTime()
-			fLastRand = RandomInt( 8, 28 )/10
+			-- Mark this slot as done so it won’t pick again
+			PickSchedule.NextPickAt[i] = math.huge
 			break
 		end
 	end
 end
 
-local RemainingPos = {
-	TEAM_RADIANT = {'1', '2', '3', '4', '5'},
-	TEAM_DIRE = {'1', '2', '3', '4', '5'},
-}
+--==============================================================================
+-- Commands & chat handling
+--==============================================================================
 
 -- Function to check if a string starts with "!"
 local function startsWithExclamation(str)
     return string.len(str) > 3 and str:sub(1, 1) == "!"
 end
--- Function to parse the command string
+
 local function parseCommand(command)
     local action, target = Utils.TrimString(command):match("^(%S+)%s+(.*)$")
     return action, target
 end
+
 local userSwitchedRole = false
 
--- Function to handle the command
 local function handleCommand(inputStr, PlayerID, bTeamOnly)
     local actionKey, actionVal = parseCommand(inputStr)
 	if actionKey == nil then
 		print('[WARN] Invalid command: '..tostring(inputStr))
 		return
 	end
-	-- if GetGameMode() == GAMEMODE_CM then
-	-- 	print('[WARN] Captain mode does not support commands')
-	-- 	return
-	-- end
 
 	local teamPlayers = GetTeamPlayers(GetTeam())
 
 	print('Handling command starting with: '..tostring(actionKey)..', text: '..tostring(actionVal))
 
 	local commands = {}
-    -- Split input by semicolon to handle multiple !pick commands
     for command in inputStr:gmatch("[^;]+") do
-        table.insert(commands, command:match("^%s*(.-)%s*$")) -- Trim whitespace
+        table.insert(commands, command:match("^%s*(.-)%s*$"))
     end
 
     for _, command in ipairs(commands) do
 		local subKey, subVal = command:match("(!%w+)%s*(.*)")
 
-	if subKey == "!pick" and GetGameMode() ~= GAMEMODE_CM and GetGameMode() ~= GAMEMODE_REVERSE_CM then
+		if subKey == "!pick" and GetGameMode() ~= GAMEMODE_CM and GetGameMode() ~= GAMEMODE_REVERSE_CM then
 			print("Picking hero " .. subVal .. ', is-for-ally: ' .. tostring(bTeamOnly))
 			local hero = GetHumanChatHero(subVal);
 			if hero ~= "" then
-				if X.IsRepeatHero(hero) then
-					print('Hero ' .. hero .. ' has already been picked')
+				if not X.CanPickHero(GetTeam(), hero) then
+					print('Hero '..hero..' cannot be picked now (banned/repeat/weakcap)')
 					return
 				end
 				if bTeamOnly then
-					for _, id in pairs(teamPlayers)
-					do
+					for _, id in pairs(teamPlayers) do
 						if IsPlayerBot(id) and IsPlayerInHeroSelectionControl(id) and GetSelectedHeroName(id) == "" then
 							SelectHero(id, hero);
+							if Utils.HasValue(WeakHeroes, hero) then
+								WeakHeroCount[GetTeam()] = WeakHeroCount[GetTeam()] + 1
+							end
 							break;
 						end
 					end
 				elseif bTeamOnly == false and GetTeamForPlayer(PlayerID) ~= GetTeam() then
-					for _, id in pairs(teamPlayers)
-					do
+					for _, id in pairs(teamPlayers) do
 						if IsPlayerBot(id) and IsPlayerInHeroSelectionControl(id) and GetSelectedHeroName(id) == "" then
 							SelectHero(id, hero);
+							if Utils.HasValue(WeakHeroes, hero) then
+								WeakHeroCount[GetTeam()] = WeakHeroCount[GetTeam()] + 1
+							end
 							break;
 						end
 					end
 				end
 				userSwitchedRole = true
 			else
-				print("Hero name not found or not supported! Please refer to the list of names here: https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/71");
+				print("Hero name not found or not supported! See: https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/71");
 			end
+
 		elseif subKey == "!ban" and GetGameState() == GAME_STATE_HERO_SELECTION then
 			print("Banning hero " .. subVal)
 			local hero = GetHumanChatHero(subVal);
 			if hero ~= "" then
-				if X.IsRepeatHero(hero) then
+				if AlreadyPickedOnTeam(hero) then
 					print('Hero  ' .. hero .. ' has already been picked')
 					return
 				end
@@ -646,47 +778,41 @@ local function handleCommand(inputStr, PlayerID, bTeamOnly)
 				print("Banned hero " .. hero.. '. Banned list:')
 				Utils.PrintTable(sBanList)
 			else
-				print("Hero name not found or not supported! Please refer to the list of names here: https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/71");
+				print("Hero name not found or not supported! See: https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/71");
 			end
+
 		elseif subKey == "!pos" and GetGameState() == GAME_STATE_PRE_GAME then
-			-- if GetTeam() == TEAM_DIRE then
-			-- 	-- broken for 7.38 for now.
-			-- 	return
-			-- end
 			print("Selecting pos " .. subVal)
-			local sTeamName = GetTeamForPlayer(PlayerID) == TEAM_RADIANT and 'TEAM_RADIANT' or 'TEAM_DIRE'
-			local remainingPos = RemainingPos[sTeamName]
+			local sTeamNameLocal = GetTeamForPlayer(PlayerID) == TEAM_RADIANT and 'TEAM_RADIANT' or 'TEAM_DIRE'
+			local remainingPos = RemainingPos[sTeamNameLocal]
 			if Utils.HasValue(remainingPos, subVal) then
 				local role = tonumber(subVal)
-				local playerIndex = PlayerID + 1 -- each team player id starts with 0, to 4 as the last player. 
-				-- this index can be differnt if the player choose a slot in lobby that has empty slots before the one the player chooses.
+				local playerIndex = PlayerID + 1
 				for idx, id in pairs(teamPlayers) do
 					if id == PlayerID then playerIndex = idx end
 				end
-				for index, id in pairs(teamPlayers)
-				do
-					if Role.RoleAssignment[sTeamName][index] == role then
+				for index, id in pairs(teamPlayers) do
+					if Role.RoleAssignment[sTeamNameLocal][index] == role then
 						if IsPlayerBot(id) then
-							-- remove so can't re-swap
-							-- table.remove(RemainingPos[team], role)
-							Role.RoleAssignment[sTeamName][playerIndex], Role.RoleAssignment[sTeamName][index] = role, Role.RoleAssignment[sTeamName][playerIndex]
+							Role.RoleAssignment[sTeamNameLocal][playerIndex], Role.RoleAssignment[sTeamNameLocal][index] = role, Role.RoleAssignment[sTeamNameLocal][playerIndex]
 							if GetTeamForPlayer(PlayerID) == TEAM_DIRE then
-								tLaneAssignList[sTeamName][CorrectDirePlayerIndexToLaneIndex[playerIndex]], tLaneAssignList[sTeamName][CorrectDirePlayerIndexToLaneIndex[index]] =
-									tLaneAssignList[sTeamName][CorrectDirePlayerIndexToLaneIndex[index]], tLaneAssignList[sTeamName][CorrectDirePlayerIndexToLaneIndex[playerIndex]]
+								tLaneAssignList[sTeamNameLocal][CorrectDirePlayerIndexToLaneIndex[playerIndex]], tLaneAssignList[sTeamNameLocal][CorrectDirePlayerIndexToLaneIndex[index]] =
+									tLaneAssignList[sTeamNameLocal][CorrectDirePlayerIndexToLaneIndex[index]], tLaneAssignList[sTeamNameLocal][CorrectDirePlayerIndexToLaneIndex[playerIndex]]
 							else
-								tLaneAssignList[sTeamName][playerIndex], tLaneAssignList[sTeamName][index] = tLaneAssignList[sTeamName][index], tLaneAssignList[sTeamName][playerIndex]
+								tLaneAssignList[sTeamNameLocal][playerIndex], tLaneAssignList[sTeamNameLocal][index] = tLaneAssignList[sTeamNameLocal][index], tLaneAssignList[sTeamNameLocal][playerIndex]
 							end
-							print('Switch role successfully. Team: '..sTeamName.. '. Player Id: '..PlayerID..', idx: '..playerIndex..', new role: '..Role.RoleAssignment[sTeamName][playerIndex])
-							print('Switch role successfully. Team: '..sTeamName.. '. Player Id: '..id..', idx: '..index..', new role: '..Role.RoleAssignment[sTeamName][index])
+							print('Switch role ok. Team: '..sTeamNameLocal.. ' PID: '..PlayerID..', idx: '..playerIndex..', new role: '..Role.RoleAssignment[sTeamNameLocal][playerIndex])
+							print('Switch role ok. Team: '..sTeamNameLocal.. ' PID: '..id..', idx: '..index..', new role: '..Role.RoleAssignment[sTeamNameLocal][index])
 						else
-							print('Switch role failed, the target role belongs to human player. Ask the player directly to switch role.')
+							print('Switch role failed: target role belongs to human.')
 						end
 						break;
 					end
 				end
 			else
-				print("Cannot select pos: " .. subVal..' because it is not available.')
+				print("Cannot select pos: " .. subVal..' (not available).')
 			end
+
 		elseif subKey:match("^!(%d+)pos$") ~= nil and GetGameState() == GAME_STATE_PRE_GAME then
 			local x, y = inputStr:match("^!(%d+)pos (%d+)$")
 			if x and y then
@@ -695,34 +821,33 @@ local function handleCommand(inputStr, PlayerID, bTeamOnly)
 				print("Invalid command format for swapping pos")
 				return
 			end
-
-			local sTeamName = GetTeamForPlayer(PlayerID) == TEAM_RADIANT and 'TEAM_RADIANT' or 'TEAM_DIRE'
-			local remainingPos = RemainingPos[sTeamName]
+			local sTeamNameLocal = GetTeamForPlayer(PlayerID) == TEAM_RADIANT and 'TEAM_RADIANT' or 'TEAM_DIRE'
+			local remainingPos = RemainingPos[sTeamNameLocal]
 			if Utils.HasValue(remainingPos, y) then
 				local role = tonumber(y)
-				local playerIndex = PlayerID + 1 -- each team player id starts with 0, to 4 as the last player. 
-				-- this index can be differnt if the player choose a slot in lobby that has empty slots before the one the player chooses.
+				local playerIndex = PlayerID + 1
 				for idx, id in pairs(teamPlayers) do
 					if idx == tonumber(x) then playerIndex = idx end
 				end
-				for index, id in pairs(teamPlayers)
-				do
-					if Role.RoleAssignment[sTeamName][index] == role then
-						Role.RoleAssignment[sTeamName][playerIndex], Role.RoleAssignment[sTeamName][index] = role, Role.RoleAssignment[sTeamName][playerIndex]
+				for index, id in pairs(teamPlayers) do
+					if Role.RoleAssignment[sTeamNameLocal][index] == role then
+						Role.RoleAssignment[sTeamNameLocal][playerIndex], Role.RoleAssignment[sTeamNameLocal][index] = role, Role.RoleAssignment[sTeamNameLocal][playerIndex]
 						if GetTeamForPlayer(PlayerID) == TEAM_DIRE then
-							tLaneAssignList[sTeamName][CorrectDirePlayerIndexToLaneIndex[playerIndex]], tLaneAssignList[sTeamName][CorrectDirePlayerIndexToLaneIndex[index]] =
-								tLaneAssignList[sTeamName][CorrectDirePlayerIndexToLaneIndex[index]], tLaneAssignList[sTeamName][CorrectDirePlayerIndexToLaneIndex[playerIndex]]
+							tLaneAssignList[sTeamNameLocal][CorrectDirePlayerIndexToLaneIndex[playerIndex]], tLaneAssignList[sTeamNameLocal][CorrectDirePlayerIndexToLaneIndex[index]] =
+								tLaneAssignList[sTeamNameLocal][CorrectDirePlayerIndexToLaneIndex[index]], tLaneAssignList[sTeamNameLocal][CorrectDirePlayerIndexToLaneIndex[playerIndex]]
 						else
-							tLaneAssignList[sTeamName][playerIndex], tLaneAssignList[sTeamName][index] = tLaneAssignList[sTeamName][index], tLaneAssignList[sTeamName][playerIndex]
+							tLaneAssignList[sTeamNameLocal][playerIndex], tLaneAssignList[sTeamNameLocal][index] =
+								tLaneAssignList[sTeamNameLocal][index], tLaneAssignList[sTeamNameLocal][playerIndex]
 						end
-						print('Switch role successfully. Team: '..sTeamName.. '. Player Id: '..PlayerID..', idx: '..playerIndex..', new role: '..Role.RoleAssignment[sTeamName][playerIndex])
-						print('Switch role successfully. Team: '..sTeamName.. '. Player Id: '..id..', idx: '..index..', new role: '..Role.RoleAssignment[sTeamName][index])
+						print('Switch role ok. Team: '..sTeamNameLocal.. ' PID: '..PlayerID..', idx: '..playerIndex..', new role: '..Role.RoleAssignment[sTeamNameLocal][playerIndex])
+						print('Switch role ok. Team: '..sTeamNameLocal.. ' PID: '..id..', idx: '..index..', new role: '..Role.RoleAssignment[sTeamNameLocal][index])
 						break;
 					end
 				end
 			else
-				print("Cannot select pos: " .. y..' because it is not available.')
+				print("Cannot select pos: " .. y..' (not available).')
 			end
+
 		elseif subKey == "!sp" or subKey == "!speak" then
 			HandleLocaleSetting(subVal)
 		else
@@ -736,29 +861,67 @@ function HandleLocaleSetting(locale)
 	print("Set to speak: ".. locale)
 end
 
+-- Initialize a clean, staggered per-slot schedule once we’re allowed to pick.
+-- Slots pick at: base + (slot-1)*step + jitter
+local function InitPickScheduleOnce()
+	if PickSchedule.initialized then return end
+
+	-- Don’t even initialize until basic preconditions are met
+	if (GameTime() < 3.0 and not bLineupReserve)
+	or X.IsHumanNotReady(GetTeam())
+	or X.IsHumanNotReady(GetOpposingTeam()) then
+		return
+	end
+
+	-- Tweak these three to taste:
+	local base  = GameTime() + 2          -- when the *first* bot may pick
+	local step  = GetTeam() * 3           -- spacing between slots
+	local jitter_min, jitter_max = 1, 3   -- small variability per slot
+
+	local teamPlayers = GetTeamPlayers(GetTeam(), true)
+	for slot = 1, #teamPlayers do
+		-- tiny jitter per-slot for a more organic feel
+		local jitter = RandomFloat(jitter_min, jitter_max)
+		PickSchedule.NextPickAt[slot] = base + (slot - 1) * step + jitter
+	end
+
+	PickSchedule.initialized = true
+
+	-- Debug:
+	-- print("Pick schedule init @ "..string.format("%.2f", GameTime()))
+	-- for i=1,5 do print("slot "..i.." at "..string.format("%.2f", PickSchedule.NextPickAt[i])) end
+end
+
+--==============================================================================
+-- Think loop
+--==============================================================================
+
 function Think()
 	if GetGameMode() == GAMEMODE_CM or GetGameMode() == GAMEMODE_REVERSE_CM then
-		CM.CaptainModeLogic(SupportedHeroes);
-		CM.AddToList();
+		CaptainMode.CaptainModeLogic(SupportedHeroes);
+		CaptainMode.AddToList();
 	elseif GetGameMode() == GAMEMODE_1V1MID then
 		OneVsOneLogic()
 	else
-		if ( GameTime() < 3.0 and not bLineupReserve )
-		or fLastSlectTime > GameTime() - fLastRand
-		or X.IsHumanNotReady( GetTeam() )
-		or X.IsHumanNotReady( GetOpposingTeam() )
-		then
-			if GetGameMode() ~= 23 then return end
+		if (GameTime() < 3.0 and not bLineupReserve)
+		or X.IsHumanNotReady(GetTeam())
+		or X.IsHumanNotReady(GetOpposingTeam()) then
+			if GetGameMode() ~= GAMEMODE_TURBO then return end
 		end
 
-		if nDelayTime == nil then nDelayTime = GameTime() fLastRand = RandomInt( 12, 34 )/10 end
-		if nDelayTime ~= nil and nDelayTime > GameTime() - fLastRand then return end
+		-- Initialize schedule once preconditions are OK
+		InitPickScheduleOnce()
+		-- If still not initialized, we’re waiting on readiness/3s gate
+		if not PickSchedule.initialized then return end
 
 		AllPickHeros()
 	end
 end
 
---function to get hero name that match the expression
+--==============================================================================
+-- Human chat helper: map human input to unit name
+--==============================================================================
+
 function GetHumanChatHero(name)
 	if name == nil then return ""; end
 	name = name:lower()
@@ -777,7 +940,7 @@ function GetHumanChatHero(name)
 	print('Hero not supported with name: '..name)
 	return "";
 end
---function to decide which team should get the hero
+
 function SelectHeroChatCallback(PlayerID, ChatText, bTeamOnly)
 	local text = string.lower(ChatText);
 
@@ -792,11 +955,11 @@ function SelectHeroChatCallback(PlayerID, ChatText, bTeamOnly)
 	end
 end
 
--- Example of overrides with specific player names for Radiant
-local playerNameOverrides = {
-    Radiant = {},
-    Dire = {}
-}
+--==============================================================================
+-- Names per team (cosmetics)
+--==============================================================================
+
+local playerNameOverrides = { Radiant = {}, Dire = {} }
 
 if Customize then
 	for i = 1, #Customize.Radiant_Names do
@@ -817,8 +980,11 @@ function GetBotNames()
 	return GetTeam() == TEAM_RADIANT and teamPlayerNames.Radiant or teamPlayerNames.Dire
 end
 
-function UpdateLaneAssignments()
+--==============================================================================
+-- Lane assignment plumbing
+--==============================================================================
 
+function UpdateLaneAssignments()
 	local team = GetTeam() == TEAM_RADIANT and 'TEAM_RADIANT' or 'TEAM_DIRE'
 
 	if GetGameMode() == GAMEMODE_MO then
@@ -830,7 +996,7 @@ function UpdateLaneAssignments()
 	end
 
 	if GetGameMode() == GAMEMODE_CM or GetGameMode() == GAMEMODE_REVERSE_CM then
-		tLaneAssignList[team] = CM.CMLaneAssignment(Role.RoleAssignment, userSwitchedRole)
+		tLaneAssignList[team] = CaptainMode.CMLaneAssignment(Role.RoleAssignment, userSwitchedRole)
 	end
 
 	if GetGameState() == GAME_STATE_HERO_SELECTION or GetGameState() == GAME_STATE_STRATEGY_TIME or GetGameState() == GAME_STATE_PRE_GAME then
@@ -838,12 +1004,10 @@ function UpdateLaneAssignments()
 	end
 
 	CorrectPotentialLaneAssignment()
-	-- print('lane for team: '..team)
-	-- Utils.PrintTable(tLaneAssignList[team])
 	return tLaneAssignList[team]
 end
 
--- Make sure the laning is in sync with the role assignment so bots won't keep switching lanings.
+-- Keep lanes in sync with roles
 function AlignLanesBasedOnRoles(team)
 	for idx, nRole in pairs(Role.RoleAssignment[team]) do
 		if nRole == 1 or nRole == 5 then
@@ -864,6 +1028,10 @@ function AlignLanesBasedOnRoles(team)
 	end
 end
 
+--==============================================================================
+-- 1v1 mode (unchanged logic, with policy-aware fallbacks)
+--==============================================================================
+
 local oboselect = false;
 function OneVsOneLogic()
 	local hero;
@@ -872,32 +1040,41 @@ function OneVsOneLogic()
 	end
 
 	for _, i in pairs(GetTeamPlayers(GetTeam())) do
-		if not oboselect and IsPlayerBot(i) and IsPlayerInHeroSelectionControl(i) and GetSelectedHeroName(i) == ""
-		then
+		if not oboselect and IsPlayerBot(i) and IsPlayerInHeroSelectionControl(i) and GetSelectedHeroName(i) == "" then
 			if Utils.IsHumanPlayerInAnyTeam() then
 				hero = GetSelectedHumanHero(GetOpposingTeam());
 			else
-				hero = X.GetNotRepeatHero( tSelectPoolList[2] );
+				hero = X.GetRandomAvailableHero(GetTeam(), tSelectPoolList[2])
+				     or sSelectList[2]
 			end
 			if hero ~= nil then
 				SelectHero(i, hero);
 				oboselect = true;
-				if Utils.HasValue(WeakHeroes, hero) then SelectedWeakHero = SelectedWeakHero + 1 end
+				if Utils.HasValue(WeakHeroes, hero) then
+					WeakHeroCount[GetTeam()] = WeakHeroCount[GetTeam()] + 1
+				end
 			end
 			return
-		elseif oboselect and IsPlayerBot(i) and IsPlayerInHeroSelectionControl(i) and GetSelectedHeroName(i) == ""
-		then
-			SelectHero(i, 'npc_dota_hero_techies');
+
+		elseif oboselect and IsPlayerBot(i) and IsPlayerInHeroSelectionControl(i) and GetSelectedHeroName(i) == "" then
+			local tech = 'npc_dota_hero_techies'
+			if X.CanPickHero(GetTeam(), tech) then
+				SelectHero(i, tech);
+			else
+				local fallback = X.GetRandomAvailableHero(GetTeam(), tSelectPoolList[2]) or sSelectList[2]
+				SelectHero(i, fallback)
+				if Utils.HasValue(WeakHeroes, fallback) then
+					WeakHeroCount[GetTeam()] = WeakHeroCount[GetTeam()] + 1
+				end
+			end
 			return
 		end
 	end
 end
 
---Get Human Selected Hero
 function GetSelectedHumanHero(team)
-	for i, id in pairs(GetTeamPlayers(team)) do
-		if not IsPlayerBot(id) and GetSelectedHeroName(id) ~= ""
-		then
+	for _, id in pairs(GetTeamPlayers(team)) do
+		if not IsPlayerBot(id) and GetSelectedHeroName(id) ~= "" then
 			return GetSelectedHeroName(id);
 		end
 	end

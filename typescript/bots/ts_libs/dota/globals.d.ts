@@ -7,6 +7,7 @@ import { Lane, Team, UnitType } from ".";
 
 declare global {
     function print(...args: any[]): void;
+    function pcall(func: any, path?: string): LuaMultiReturn<[boolean, any]>;
 
     function GetBot(): Unit;
 
@@ -65,6 +66,10 @@ declare global {
     function Clamp(value: number, min: number, max: number): number;
     function RemapValClamped(value: number, fromMin: number, fromMax: number, toMin: number, toMax: number): number;
     function GetDefendLaneDesire(lane: Lane): number;
+    function GetPushLaneDesire(lane: Lane): number;
+    function GetUnitToLocationDistance(unit: any, location: Vector): number;
+
+    function RandomFloat(min: number, max: number): number;
 
     interface HTTPRequest {
         SetHTTPRequestRawPostBody(contentType: string, body: string): void;

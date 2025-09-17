@@ -70,13 +70,17 @@ sRoleItemsBuyList['pos_5'] = {
 }
 
 sRoleItemsBuyList['pos_1'] = {
-	"item_medusa_outfit",
-	"item_hand_of_midas",
---	"item_glimmer_cape",
+    "item_tango",
+    "item_double_branches",
+    "item_faerie_fire",
+
+    "item_double_null_talisman",
+    "item_power_treads",
+    "item_magic_wand",
     "item_kaya",
-	"item_force_staff",
     "item_ultimate_scepter",
     "item_kaya_and_sange",--
+	"item_force_staff",
 	"item_hurricane_pike",--
 	"item_orchid",
 	"item_aghanims_shard",
@@ -89,8 +93,13 @@ sRoleItemsBuyList['pos_1'] = {
 }
 
 sRoleItemsBuyList['pos_2'] = {
-	"item_medusa_outfit",
-	-- "item_hand_of_midas",
+    "item_tango",
+    "item_double_branches",
+    "item_faerie_fire",
+
+    "item_double_null_talisman",
+    "item_power_treads",
+    "item_magic_wand",
     "item_kaya",
     "item_ultimate_scepter",
     "item_kaya_and_sange",--

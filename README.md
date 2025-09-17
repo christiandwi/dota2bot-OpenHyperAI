@@ -28,10 +28,10 @@ Thanks and kudos to everyone who contributed to making bot games fun and excitin
 
   * [Customize/general.lua](bots/Customize/general.lua) – general settings.
   * [Customize/hero/viper.lua](bots/Customize/hero/viper.lua) – hero-specific settings.
-  * Path depends on install method:
-
-    * **Workshop only**: `<Steam\steamapps\workshop\content\570\3246316298\Customize>`
-    * **Quick-install**: `<Steam\steamapps\common\dota 2 beta\game\dota\scripts\vscripts\game\Customize>`
+  * Customize path depends on your install method:
+    * **Permanent customization**: Move Customize folder to be `<Steam\steamapps\common\dota 2 beta\game\dota\scripts\vscripts\game\Customize>`
+    * **Workshop item (Can get overridden by future script updates)**: Direct customize in `<Steam\steamapps\workshop\content\570\3246316298\Customize>`
+    * You can use the **Permanent customization** option to avoid your custom settings getting replaced/overridden by workshop upgrades.
 * ✅ **Dynamic difficulty (Fretbots mode)** – boosts bots with huge unfair advantages for real challenge.
 * ✅ Supports **most game modes** (see [discussion](https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/72)).
 * ✅ Improved decision-making: ability casting, items, roaming, farming, defense.
@@ -41,7 +41,7 @@ Thanks and kudos to everyone who contributed to making bot games fun and excitin
 
 ---
 
-## How to Install
+## How to Install for Enhance mode
 
 1. Create a **Custom Lobby** → select **Local Host** as **Server Location**.
 2. To enable **Fretbots mode** (harder bots, neutral items, chatbot, etc.), you must **manually install** the script: [Instructions here](https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/68).
@@ -63,12 +63,12 @@ Thanks and kudos to everyone who contributed to making bot games fun and excitin
 ## In-Game Commands
 
 * `!pos X` → Swap your lane/role with a bot (e.g., `!pos 2`).
-* `!pick HERO` → Pick a hero for yourself.
+* `!pick HERO_NAME` → Pick a hero for yourself.
 
-  * `/all !pick HERO` → Pick hero for enemy.
-  * Use internal names if needed (`!pick npc_dota_hero_keeper_of_the_light`). [List here](https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/71).
-* `!Xpos Y` → Reassign other bots’ positions (e.g., `!3pos 5`).
-* `!ban HERO` → Ban a hero from being picked.
+  * `/all !pick HERO_NAME` → Pick hero for enemy.
+  * Use internal names if the short names can overlap (`!pick npc_dota_hero_keeper_of_the_light`). [Find the list of internal names here](https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/71).
+* `!Xpos Y` → Reassign other bots’ positions (e.g., `!3pos 5` to let the 3rd bot on the team play pos 5, do note it's the bot on the 3rd slot in the team not the bot that plays pos 3 at that moment).
+* `!ban HERO_NAME` → Ban a hero from being picked.
 * `!sp XX` → Set bot language (`!sp en`, `!sp zh`, `!sp ru`, `!sp ja`).
 * **Batch commands** supported (e.g., `!pick io; !ban sniper`).
 
@@ -79,7 +79,8 @@ Thanks and kudos to everyone who contributed to making bot games fun and excitin
 * Contributions welcome on [GitHub](https://github.com/forest0xia/dota2bot-OpenHyperAI).
 * Custom item/skill builds don’t need PRs – just tweak locally.
 * Future development is in **TypeScript** for better maintainability.
-* Project structure (bots, Funlib, Customize, BotLib, typescript, game)：
+* Project structure (bots, Funlib, Customize, BotLib, typescript, game)
+* To develope the script, you need to make sure the script is under this root directory:
 ```
 root: <Steam\steamapps\common\dota 2 beta\game\dota\scripts\vscripts>
 │
@@ -103,6 +104,10 @@ root: <Steam\steamapps\common\dota 2 beta\game\dota\scripts\vscripts>
 │   └───BotLib: contains the bot item purcahse, ability usage, etc logic for every bots.
 │       │   hero_abaddon.lua
 │       │   ...
+│   │
+│   └───FretBots: contains the configs/utils of the FretBots mode setup
+│   │   │   SettingsDefault.lua: to adjust bonus values
+│   │   │   ...
 │   
 └───typescript: contains the scripts written in typescript (TS) to maintain this project in a more 
 │   │           extendable way since TS supports types and can catch errors in compile time.
@@ -134,7 +139,7 @@ root: <Steam\steamapps\common\dota 2 beta\game\dota\scripts\vscripts>
   * Better support for bugged heroes (Dark Willow, IO, Lone Druid, Muerta, etc.).
   * Full mode support + patch fixes.
 * [Open feature requests](https://github.com/forest0xia/dota2bot-OpenHyperAI/issues?q=is%3Aissue+is%3Aopen+%5BFeature+request%5D)
-
+* [Some feedback to Valve Dota2 bot team](https://www.reddit.com/r/DotA2/comments/1ezxpav/)
 ---
 
 ## Support

@@ -8,7 +8,7 @@
 // Collect and use the original enums from dota2 scripting in order to avoid accidentially changing or re-defining
 // the value of the enum that potentially can cause discrepancy between code in this script vs dota2 game engine.
 /** @compileMembersOnly */
-declare enum BotScriptEnums {
+export declare enum BotScriptEnums {
     // Bot Modes
     BOT_MODE_NONE,
     BOT_MODE_LANING,
@@ -51,6 +51,7 @@ declare enum BotScriptEnums {
     BOT_MODE_DESIRE_VERYHIGH,
     BOT_MODE_DESIRE_ABSOLUTE,
     // Damage Types
+    DAMAGE_TYPE_NONE,
     DAMAGE_TYPE_PHYSICAL,
     DAMAGE_TYPE_MAGICAL,
     DAMAGE_TYPE_PURE,
@@ -403,6 +404,7 @@ declare enum BotScriptEnums {
 }
 
 const DESIRE_NONE = 0.0;
+const DESIRE_EXTRA_LOW = 0.05;
 const DESIRE_VERY_LOW = 0.1;
 const DESIRE_LOW = 0.25;
 const DESIRE_MODERATE = 0.5;
@@ -422,6 +424,7 @@ export enum BotActionDesire {
 
 export enum BotModeDesire {
     None = BotScriptEnums.BOT_MODE_DESIRE_NONE || DESIRE_NONE,
+    ExtraLow = DESIRE_EXTRA_LOW,
     VeryLow = BotScriptEnums.BOT_MODE_DESIRE_VERYLOW || DESIRE_VERY_LOW,
     Low = BotScriptEnums.BOT_MODE_DESIRE_LOW || DESIRE_LOW,
     Moderate = BotScriptEnums.BOT_MODE_DESIRE_MODERATE || DESIRE_MODERATE,
@@ -640,4 +643,12 @@ export enum GameMode {
     Turbo = BotScriptEnums.GAMEMODE_TURBO || 23,
     Mutation = BotScriptEnums.GAMEMODE_MUTATION || 24,
     CoachesChallenge = BotScriptEnums.GAMEMODE_COACHES_CHALLENGE || 25,
+}
+
+export enum DamageType {
+    None = BotScriptEnums.DAMAGE_TYPE_NONE || 0,
+    Physical = BotScriptEnums.DAMAGE_TYPE_PHYSICAL || 1,
+    Magical = BotScriptEnums.DAMAGE_TYPE_MAGICAL || 2,
+    Pure = BotScriptEnums.DAMAGE_TYPE_PURE || 4,
+    All = BotScriptEnums.DAMAGE_TYPE_ALL || 7,
 }

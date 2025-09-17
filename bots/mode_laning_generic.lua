@@ -14,12 +14,6 @@ local botAssignedLane = nil
 local botAttackRange = bot:GetAttackRange()
 local attackDamage = bot:GetAttackDamage()
 
-local skipLaningState = {
-	count = 0,
-	lastCheckTime = 0,
-	checkGap = 3,
-}
-
 if Utils.BuggyHeroesDueToValveTooLazy[botName] then local_mode_laning_generic = dofile( GetScriptDirectory().."/FunLib/override_generic/mode_laning_generic" ) end
 
 function GetDesire()
@@ -109,10 +103,6 @@ function GetDesire()
 
 	J.Utils.GameStates.passiveLaningTime = true
 	return 0.01
-end
-
-function OnStart()
-	skipLaningState.count = skipLaningState.count + 1
 end
 
 function GetFurthestEnemyAttackRange(enemyList)

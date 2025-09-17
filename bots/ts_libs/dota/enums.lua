@@ -1,6 +1,7 @@
 --[[ Generated with https://github.com/TypeScriptToLua/TypeScriptToLua ]]
 local ____exports = {}
 local DESIRE_NONE = 0
+local DESIRE_EXTRA_LOW = 0.05
 local DESIRE_VERY_LOW = 0.1
 local DESIRE_LOW = 0.25
 local DESIRE_MODERATE = 0.5
@@ -25,6 +26,8 @@ ____exports.BotActionDesire[____exports.BotActionDesire.Absolute] = "Absolute"
 ____exports.BotModeDesire = BotModeDesire or ({})
 ____exports.BotModeDesire.None = BOT_MODE_DESIRE_NONE or DESIRE_NONE
 ____exports.BotModeDesire[____exports.BotModeDesire.None] = "None"
+____exports.BotModeDesire.ExtraLow = 0.05
+____exports.BotModeDesire[____exports.BotModeDesire.ExtraLow] = "ExtraLow"
 ____exports.BotModeDesire.VeryLow = BOT_MODE_DESIRE_VERYLOW or DESIRE_VERY_LOW
 ____exports.BotModeDesire[____exports.BotModeDesire.VeryLow] = "VeryLow"
 ____exports.BotModeDesire.Low = BOT_MODE_DESIRE_LOW or DESIRE_LOW
@@ -396,4 +399,15 @@ ____exports.GameMode.Mutation = GAMEMODE_MUTATION or 24
 ____exports.GameMode[____exports.GameMode.Mutation] = "Mutation"
 ____exports.GameMode.CoachesChallenge = GAMEMODE_COACHES_CHALLENGE or 25
 ____exports.GameMode[____exports.GameMode.CoachesChallenge] = "CoachesChallenge"
+____exports.DamageType = DamageType or ({})
+____exports.DamageType.None = DAMAGE_TYPE_NONE or 0
+____exports.DamageType[____exports.DamageType.None] = "None"
+____exports.DamageType.Physical = DAMAGE_TYPE_PHYSICAL or 1
+____exports.DamageType[____exports.DamageType.Physical] = "Physical"
+____exports.DamageType.Magical = DAMAGE_TYPE_MAGICAL or 2
+____exports.DamageType[____exports.DamageType.Magical] = "Magical"
+____exports.DamageType.Pure = DAMAGE_TYPE_PURE or 4
+____exports.DamageType[____exports.DamageType.Pure] = "Pure"
+____exports.DamageType.All = DAMAGE_TYPE_ALL or 7
+____exports.DamageType[____exports.DamageType.All] = "All"
 return ____exports

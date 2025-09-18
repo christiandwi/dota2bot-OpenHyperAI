@@ -726,7 +726,7 @@ function X.ConsiderSpellSteal()
     then
         return BOT_ACTION_DESIRE_NONE, nil
     end
-    if DotaTime() - lastTimeStealSpell < 15 then
+    if DotaTime() - lastTimeStealSpell < 60 then
         -- or low cd high dmg spells
         if StolenSpell1:IsFullyCastable() and StolenSpell1:IsUltimate() and not bot:HasScepter() then
             return BOT_ACTION_DESIRE_NONE, nil

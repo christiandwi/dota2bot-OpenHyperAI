@@ -3,6 +3,8 @@ local botName = bot:GetUnitName();
 if bot == nil or bot:IsInvulnerable() or not bot:IsHero() or not bot:IsAlive() or not string.find(botName, "hero") or bot:IsIllusion() then return end
 
 local J = require(GetScriptDirectory()..'/FunLib/jmz_func')
+local Customize = require(GetScriptDirectory()..'/Customize/general')
+Customize.ThinkLess = Customize.Enable and Customize.ThinkLess or 1
 
 local botTeam = bot:GetTeam()
 local enemyTeam = botTeam == TEAM_RADIANT and TEAM_DIRE or TEAM_RADIANT
@@ -13,9 +15,21 @@ local DIRE_SECRET_SHOP = GetShopLocation(GetTeam(), SHOP_SECRET2 )
 local hasItemToSell = false;
 
 function GetDesire()
+	local cacheKey = 'GetSecretShopDesire'..tostring(bot:GetPlayerID())
+	local cachedVar = J.Utils.GetCachedVars(cacheKey, 0.5 * (1 + Customize.ThinkLess))
+	if cachedVar ~= nil then return cachedVar end
+	local res = GetDesireHelper()
+	J.Utils.SetCachedVars(cacheKey, res)
+	return res
+end
+function GetDesireHelper()
 
 	-- 如果在打高地 就别撤退去干别的
 	if J.Utils.IsTeamPushingSecondTierOrHighGround(bot) then
+		return BOT_MODE_DESIRE_NONE
+	end
+
+	if J.IsFarming(bot) and J.IsPushing(bot) and J.IsDefending(bot) then
 		return BOT_MODE_DESIRE_NONE
 	end
 
@@ -72,7 +86,7 @@ function OnEnd()
 end
 
 function Think()
-
+	if J.CanNotUseAction(bot) then return end
 	if bot:IsChanneling() 
 		or bot:NumQueuedActions() > 0
 		or bot:IsCastingAbility()
@@ -80,7 +94,11 @@ function Think()
 	then 
 		return
 	end
-	
+	if J.Utils.IsBotThinkingMeaningfulAction(bot, Customize.ThinkLess, "secret_shop") then return end
+
+	if preferedShop == nil then
+		preferedShop = X.GetPreferedSecretShop();
+	end
 	if bot:DistanceFromSecretShop() == 0
 	then
 		bot:Action_MoveToLocation(preferedShop + RandomVector(200))
@@ -126,14 +144,12 @@ function X.GetPreferedSecretShop()
 		else
 			return RAD_SECRET_SHOP;
 		end
-	elseif GetTeam() == TEAM_DIRE then
-		if GetUnitToLocationDistance(bot, RAD_SECRET_SHOP) <= 3800 then
-			return RAD_SECRET_SHOP;
-		else
-			return DIRE_SECRET_SHOP;
-		end
 	end
-	return nil;
+	if GetUnitToLocationDistance(bot, RAD_SECRET_SHOP) <= 3800 then
+		return RAD_SECRET_SHOP;
+	else
+		return DIRE_SECRET_SHOP;
+	end
 end
 
 function X.IsSuitableToBuy()

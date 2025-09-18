@@ -783,15 +783,17 @@ function X.ConsiderWintersCurse()
             local nInRangeAlly = J.GetAlliesNearLoc(bot:GetLocation(), 1000)
             if nInRangeAlly ~= nil and #nInRangeAlly <= #realEnemyCount then
                 local nWeakestEnemyHero = J.GetAttackableWeakestUnit( bot, nCastRange + 200, true, true )
-                local nInRangeAlly = J.GetNearbyHeroes(nWeakestEnemyHero, 400, true, BOT_MODE_NONE)
-                if nInRangeAlly == nil or #nInRangeAlly <= 0 then
-                    if J.IsValidHero(nWeakestEnemyHero)
-                    and J.GetHP(nWeakestEnemyHero) >= 0.5
-                    and not J.IsSuspiciousIllusion(nWeakestEnemyHero)
-                    and not J.IsDisabled(nWeakestEnemyHero)
-                    and not nWeakestEnemyHero:HasModifier('modifier_necrolyte_reapers_scythe')
-                    and not J.IsUnderLongDurationStun(nWeakestEnemyHero) then
-                        return BOT_ACTION_DESIRE_HIGH, nWeakestEnemyHero
+                if nWeakestEnemyHero ~= nil then
+                    local nInRangeAlly = J.GetNearbyHeroes(nWeakestEnemyHero, 400, true, BOT_MODE_NONE)
+                    if nInRangeAlly == nil or #nInRangeAlly <= 0 then
+                        if J.IsValidHero(nWeakestEnemyHero)
+                        and J.GetHP(nWeakestEnemyHero) >= 0.5
+                        and not J.IsSuspiciousIllusion(nWeakestEnemyHero)
+                        and not J.IsDisabled(nWeakestEnemyHero)
+                        and not nWeakestEnemyHero:HasModifier('modifier_necrolyte_reapers_scythe')
+                        and not J.IsUnderLongDurationStun(nWeakestEnemyHero) then
+                            return BOT_ACTION_DESIRE_HIGH, nWeakestEnemyHero
+                        end
                     end
                 end
             end

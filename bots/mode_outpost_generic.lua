@@ -3,6 +3,7 @@ local botName = bot:GetUnitName()
 if bot == nil or bot:IsInvulnerable() or not bot:IsHero() or not bot:IsAlive() or not string.find(botName, "hero") or bot:IsIllusion() then return end
 
 local J = require( GetScriptDirectory()..'/FunLib/jmz_func')
+local Customize = require( GetScriptDirectory()..'/Customize/general' )
 
 local Outposts = {}
 local DidWeGetOutpost = false
@@ -13,6 +14,15 @@ local IsEnemyTier2Down = false
 local hAbilityCapture = bot:GetAbilityByName('ability_capture')
 
 function GetDesire()
+	local cacheKey = 'GetOutpostDesire'..tostring(bot:GetPlayerID())
+	local cachedVar = J.Utils.GetCachedVars(cacheKey, 0.5 * (1 + Customize.ThinkLess))
+	if cachedVar ~= nil then return cachedVar end
+	local res = GetDesireHelper()
+	J.Utils.SetCachedVars(cacheKey, res)
+	return res
+end
+function GetDesireHelper()
+	if bot:IsInvulnerable() or not bot:IsHero() or not bot:IsAlive() or not string.find(botName, "hero") or bot:IsIllusion() then return BOT_MODE_DESIRE_NONE end
 
 	if not IsEnemyTier2Down
 	then
@@ -92,6 +102,7 @@ end
 
 function Think()
 	if J.CanNotUseAction(bot) then return end
+	if J.Utils.IsBotThinkingMeaningfulAction(bot, Customize.ThinkLess, "outpost") then return end
 
 	if ClosestOutpost ~= nil
 	then

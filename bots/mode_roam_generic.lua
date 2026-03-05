@@ -49,11 +49,11 @@ local laneAndT1s = {
 }
 
 function GetDesire()
-	local cacheKey = 'GetRoamDesire'..tostring(bot:GetPlayerID())
-	local cachedVar = J.Utils.GetCachedVars(cacheKey, 0.5 * (1 + Customize.ThinkLess))
-	if cachedVar ~= nil then return cachedVar end
+	-- local cacheKey = 'GetRoamDesire'..tostring(bot:GetPlayerID())
+	-- local cachedVar = J.Utils.GetCachedVars(cacheKey, 0.5 * (1 + Customize.ThinkLess))
+	-- if DotaTime() > 30 and cachedVar ~= nil then return cachedVar end
 	local res = GetDesireHelper()
-	J.Utils.SetCachedVars(cacheKey, res)
+	-- J.Utils.SetCachedVars(cacheKey, res)
 	return res
 end
 function GetDesireHelper()
@@ -88,7 +88,7 @@ function GetDesireHelper()
 		return BOT_ACTION_DESIRE_ABSOLUTE
 	end
 
-	if DotaTime() > 0 and DotaTime() - ShouldMoveOutsideFountainCheckTime < 2 then
+	if bot:HasModifier('modifier_fountain_aura_buff') and DotaTime() > 0 and DotaTime() - ShouldMoveOutsideFountainCheckTime < 2 then
 		return Clamp(bot:GetActiveModeDesire() + 0.2, 0, 1.1)
 	else
 		ShouldMoveOutsideFountain = false
@@ -138,7 +138,34 @@ function GetDesireHelper()
 	return BOT_MODE_DESIRE_NONE
 end
 
+-- Frame rate limiting for performance
+local lastThinkTime = 0
+local THINK_INTERVAL = 1/30 -- Limit to 30 FPS max
+local lastAction = nil -- {type, target, time}
+
+-- Helper function to record actions
+local function recordAction(actionType, target)
+    lastAction = {type = actionType, target = target, time = DotaTime()}
+end
+
 function Think()
+    -- Frame rate limiting
+    local now = DotaTime()
+    if now - lastThinkTime < THINK_INTERVAL then 
+        -- Continue last action to prevent idle bots
+        if lastAction and now - lastAction.time < 2.0 then
+            if lastAction.type == "attack" and lastAction.target then
+                bot:Action_AttackUnit(lastAction.target, true)
+            elseif lastAction.type == "move" and lastAction.target then
+                bot:Action_MoveToLocation(lastAction.target)
+            elseif lastAction.type == "attackMove" and lastAction.target then
+                bot:Action_AttackMove(lastAction.target)
+            end
+        end
+        return 
+    end
+    lastThinkTime = now
+    
     if J.CanNotUseAction(bot) then return end
 	if J.Utils.IsBotThinkingMeaningfulAction(bot, Customize.ThinkLess, "roam") then return end
 
@@ -274,7 +301,9 @@ function ThinkIndividualRoaming()
 
 			if target ~= nil
 			then
-				bot:Action_MoveToLocation(J.GetCorrectLoc(target, 0.2))
+				local moveLoc = J.GetCorrectLoc(target, 0.2)
+				recordAction("move", moveLoc)
+				bot:Action_MoveToLocation(moveLoc)
 				return
 			end
 		end
@@ -900,9 +929,12 @@ function GeneralReactToStackedDebuff(enemyHeroName)
 	if enemy ~= nil then -- nil check is enough here
 		if J.GetHP(bot) > 0.6 and not J.Utils.NumActionTypeInQueue(BOT_ACTION_TYPE_ATTACK) <= 2 then
 			bot:ActionImmediate_Ping(enemy:GetLocation().x, enemy:GetLocation().y, true)
+			recordAction("attack", enemy)
 			bot:ActionQueue_AttackUnit(enemy, false)
 		else
-			bot:Action_MoveToLocation(J.GetTeamFountain())
+			local fountainLoc = J.GetTeamFountain()
+			recordAction("move", fountainLoc)
+			bot:Action_MoveToLocation(fountainLoc)
 		end
 	end
 end
@@ -1036,7 +1068,7 @@ function CheckLaneToGank(botPosition)
 				local nInRangeAlly = J.GetAlliesNearLoc(laneFront, 1200)
 
 				if enableGateUsage
-				and laneFrontToT1Dist < 2000
+				and laneFrontToT1Dist < 800
 				then
 					targetGate = GetGateNearLane(laneFront)
 					if enemyCountInLane >= #nInRangeAlly
@@ -1135,7 +1167,7 @@ function ConsiderUseTango()
 	end
 	if tangoSlot >= 0
 	and bot:OriginalGetMaxHealth() - bot:OriginalGetHealth() > 250
-	and J.GetHP(bot) > 0.15
+	and J.GetHP(bot) < 0.6
 	and not J.IsAttacking(bot)
 	and not bot:WasRecentlyDamagedByAnyHero(2) then
 		local trees = bot:GetNearbyTrees( 800 )
@@ -1251,6 +1283,10 @@ function CanBeAffectedByChainFrost()
 end
 
 function ConsiderGeneralRoamingInConditions()
+	if J.GetHP(bot) < 0.35 then
+		return BOT_ACTION_DESIRE_NONE
+	end
+
 	-- if not botTarget then
 	-- 	botTarget = J.GetAttackableWeakestUnit( bot, 1500, true, true )
 	-- 	bot:SetTarget( botTarget )

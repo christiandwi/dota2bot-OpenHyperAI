@@ -21,8 +21,8 @@ local nRuneList = {
 	RUNE_POWERUP_2,
 }
 
-local radiantWRLocation = Vector(-7988.583008, 423.058716, 256.000000)
-local direWRLocation = Vector(8244.062500, -1026.568848, 256.000000)
+local radiantWRLocation = Vector(-7948.152344, 768.207825, 256.000000)
+local direWRLocation = Vector(8029.234375, -1125.811768, 256.000000)
 local wisdomRuneSpots = {
 	[1] = radiantWRLocation,
 	[2] = direWRLocation,
@@ -31,11 +31,11 @@ local wisdomRuneInfo = {0, 0, false} -- time, loc, did
 local timeInMin = 0
 
 function GetDesire()
-	local cacheKey = 'GetRuneDesire'..tostring(bot:GetPlayerID())
-	local cachedVar = J.Utils.GetCachedVars(cacheKey, 0.5 * (1 + Customize.ThinkLess))
-	if cachedVar ~= nil then return cachedVar end
+	-- local cacheKey = 'GetRuneDesire'..tostring(bot:GetPlayerID())
+	-- local cachedVar = J.Utils.GetCachedVars(cacheKey, 0.5 * (1 + Customize.ThinkLess))
+	-- if DotaTime() > 30 and cachedVar ~= nil then return cachedVar end
 	local res = GetDesireHelper()
-	J.Utils.SetCachedVars(cacheKey, res)
+	-- J.Utils.SetCachedVars(cacheKey, res)
 	return res
 end
 function GetDesireHelper()
@@ -45,8 +45,8 @@ function GetDesireHelper()
         return BOT_MODE_DESIRE_NONE
     end
 
-    local nInRangeEnemy = J.GetLastSeenEnemiesNearLoc(bot:GetLocation(), 1200)
-    if #nInRangeEnemy > 0 and not J.IsInLaningPhase() then
+    local nInRangeEnemy = J.GetLastSeenEnemiesNearLoc(bot:GetLocation(), 1000)
+    if #nInRangeEnemy > 0 and (not J.IsInLaningPhase() or DotaTime() < 30) then
         return BOT_MODE_DESIRE_NONE
     end
 
@@ -124,8 +124,8 @@ function GetDesireHelper()
 
 	ClosestRune, ClosestDistance = X.GetBotClosestRune()
 
-	if ClosestRune ~= -1 and ClosestDistance < 1600 then
-		local nInRangeAlly = bot:GetNearbyHeroes(1600, false, BOT_MODE_NONE)
+	if ClosestRune ~= -1 and ClosestDistance < 1200 then
+		local nInRangeAlly = bot:GetNearbyHeroes(1200, false, BOT_MODE_NONE)
 		if #nInRangeAlly > 0 then
 			for _, ally in pairs(nInRangeAlly) do
 				if not ally:IsBot() then
@@ -145,6 +145,12 @@ function GetDesireHelper()
         if #nEnemyHeroes <= 1 then
             return BOT_MODE_DESIRE_MODERATE
         end
+    end
+
+	if J.IsLateGame() and X.IsUnitAroundLocation(GetAncient(GetTeam()):GetLocation(), 2800) then
+        MAX_DIST = 900
+    else
+        MAX_DIST = 1600
     end
 
 	if ClosestRune ~= -1 and ClosestDistance < 6000 then
@@ -425,21 +431,20 @@ function X.GetBotClosestRune()
 	local cRune = -1
 
 	for _, rune in pairs(nRuneList) do
-		if not (J.IsCore(bot) and DotaTime() > 170 and IsBountyRune(rune)) then
-			local rLoc = GetRuneSpawnLocation(rune)
-			if X.IsTheClosestOne(rLoc, rune)
-			and not X.IsPingedByHumanPlayer(rLoc, 1200)
-			and not X.IsMissing(rune)
-			and not X.IsTherePosition(1, rune, 1600)
-			and not X.IsTherePosition(2, rune, 1600)
-			then
-				local dist = GetUnitToLocationDistance(bot, rLoc)
-				if dist < cDist then
-					cDist = dist
-					cRune = rune
-				end
-			end
-		end
+		local rLoc = GetRuneSpawnLocation(rune)
+
+        if X.IsTheClosestOne(rLoc, rune)
+        and not X.IsPingedByHumanPlayer(rLoc, 1200)
+		and not X.IsMissing(rune)
+		and not X.IsTherePosition(1, rune, 1600)
+		and not X.IsTherePosition(2, rune, 1600)
+        then
+            local dist = GetUnitToLocationDistance(bot, rLoc)
+            if dist < cDist then
+                cDist = dist
+                cRune = rune
+            end
+        end
 	end
 
 	return cRune, cDist
@@ -567,13 +572,13 @@ function X.IsEnemyPickRune(nRune)
 	return false
 end
 
-local maxDesire = 0.85
 function X.GetScaledDesire(nBase, nCurrDist, nMaxDist)
-	if nCurrDist > 900 and (J.IsLateGame() or J.GetDistanceFromEnemyFountain( bot ) < 6500) then
-		maxDesire = 0.45
+	local maxDesire = 0.85
+	if nCurrDist > 2000 and (J.IsLateGame() or J.GetDistanceFromEnemyFountain( bot ) < 5500) then
+		maxDesire = 0.55
 	end
 	local hp = J.GetHP(bot)
-	local resDesire = Clamp(nBase * RemapValClamped(nCurrDist, 0, nMaxDist, 1, 0.1), 0, maxDesire)
+	local resDesire = Clamp(nBase * RemapValClamped(nCurrDist, 0, nMaxDist, 1, 0.5), 0, maxDesire)
 	if hp < 0.6 then
 		resDesire = RemapValClamped(hp, 0, 0.8, 0, resDesire)
 	end

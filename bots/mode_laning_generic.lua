@@ -1,6 +1,10 @@
 local Utils = require( GetScriptDirectory()..'/FunLib/utils')
 local J = require( GetScriptDirectory()..'/FunLib/jmz_func')
 
+local Version      = require(GetScriptDirectory()..'/FunLib/version')
+local Localization = require(GetScriptDirectory()..'/FunLib/localization')
+
+
 local bot = GetBot()
 local botName = bot:GetUnitName()
 if bot == nil or bot:IsInvulnerable() or not bot:IsHero() or not bot:IsAlive() or not string.find(botName, "hero") or bot:IsIllusion() then return end
@@ -13,10 +17,22 @@ local nInRangeEnemy = nil
 local botAssignedLane = nil
 local botAttackRange = bot:GetAttackRange()
 local attackDamage = bot:GetAttackDamage()
+local nH, enemyBots = J.Utils.NumHumanBotPlayersInTeam(GetOpposingTeam())
+local teamHumans, teamBots = J.Utils.NumHumanBotPlayersInTeam(GetTeam())
+
+-- Announcer state
+local hasPickedOneAnnouncer      = false
+local lastAnnouncePrintedTime    = 0
+local numberAnnouncePrinted      = 1
+local announcementGapSeconds     = 6
+local isChangePosMessageDone     = false
 
 if Utils.BuggyHeroesDueToValveTooLazy[botName] then local_mode_laning_generic = dofile( GetScriptDirectory().."/FunLib/override_generic/mode_laning_generic" ) end
 
 function GetDesire()
+	PickOneAnnouncer()
+	AnnounceMessages()
+
 	if bot:IsInvulnerable() or not bot:IsHero() or not bot:IsAlive() or not string.find(botName, "hero") or bot:IsIllusion() then return BOT_MODE_DESIRE_NONE end
 	local botLV = bot:GetLevel()
 	local currentTime = DotaTime()
@@ -157,17 +173,45 @@ function GetBestDenyCreep(hCreepList)
 end
 
 if local_mode_laning_generic or (J.GetPosition(bot) == 1 and J.IsPosxHuman(5)) then
+	-- Frame rate limiting for performance
+	local lastLaningThinkTime = 0
+	local LANING_THINK_INTERVAL = 1/30 -- Limit to 30 FPS max
+	local lastLaningAction = nil -- {type, target, time}
+	
+	-- Helper function to record actions
+	local function recordLaningAction(actionType, target)
+		lastLaningAction = {type = actionType, target = target, time = DotaTime()}
+	end
+	
 	function Think()
+		-- Frame rate limiting
+		local now = DotaTime()
+		if now - lastLaningThinkTime < LANING_THINK_INTERVAL then 
+			-- Continue last action to prevent idle bots
+			if lastLaningAction and now - lastLaningAction.time < 2.0 then
+				if lastLaningAction.type == "attack" and lastLaningAction.target then
+					bot:Action_AttackUnit(lastLaningAction.target, true)
+				elseif lastLaningAction.type == "move" and lastLaningAction.target then
+					bot:Action_MoveToLocation(lastLaningAction.target)
+				elseif lastLaningAction.type == "attackMove" and lastLaningAction.target then
+					bot:Action_AttackMove(lastLaningAction.target)
+				end
+			end
+			return 
+		end
+		lastLaningThinkTime = now
 		local hitCreep, moveToCreep = GetBestLastHitCreep(nEnemyCreeps)
 		if J.IsValid(hitCreep) then
 			if J.GetPosition(bot) <= 2 or not J.IsThereNonSelfCoreNearby(700)
 			then
 				if GetUnitToUnitDistance(bot, hitCreep) > botAttackRange
 				or (moveToCreep and GetUnitToUnitDistance(bot, hitCreep) > botAttackRange * 0.8) then
+					recordLaningAction("move", hitCreep)
 					bot:Action_MoveToUnit(hitCreep)
 					return
 				else
 					bot:SetTarget(hitCreep)
+					recordLaningAction("attack", hitCreep)
 					bot:Action_AttackUnit(hitCreep, true)
 					return
 				end
@@ -196,5 +240,60 @@ if local_mode_laning_generic or (J.GetPosition(bot) == 1 and J.IsPosxHuman(5)) t
 		end
 
 		bot:Action_MoveToLocation(target_loc + RandomVector(50))
+	end
+end
+
+
+function PickOneAnnouncer()
+	if not hasPickedOneAnnouncer then
+		for i, _ in pairs(GetTeamPlayers(GetTeam())) do
+			local member = GetTeamMember(i)
+			if member ~= nil and member.isAnnouncer then return end
+		end
+		bot.isAnnouncer = true
+		hasPickedOneAnnouncer = true
+	end
+end
+
+function AnnounceMessages()
+	-- Only pre-game chatter
+	if DotaTime() > 60 then return end
+
+	local welcomeMessages = Localization.Get('welcome_msgs')
+	local inTurbo         = J.IsModeTurbo()
+
+	-- Staggered lines during negative DotaTime pre-game
+	if ((inTurbo and DotaTime() > -50 + GetTeam() * 2) or (not inTurbo and DotaTime() > -75 + GetTeam() * 2))
+	   and numberAnnouncePrinted < #welcomeMessages + 1
+	   and bot.isAnnouncer
+	   and DotaTime() < 0
+	then
+		if GameTime() - lastAnnouncePrintedTime >= announcementGapSeconds then
+			local message      = welcomeMessages[numberAnnouncePrinted]
+			local isFirstLine  = (numberAnnouncePrinted == 1)
+			if message then
+				-- Match original behavior: first line (or if no enemy bots) can be global
+				bot:ActionImmediate_Chat(isFirstLine and (message .. Version.number) or message, enemyBots == 0 or isFirstLine)
+			end
+			numberAnnouncePrinted   = numberAnnouncePrinted + 1
+			lastAnnouncePrintedTime = GameTime()
+		end
+	end
+
+	-- Announce role during pre-game
+	if GetGameMode() ~= GAMEMODE_1V1MID
+	   and GetGameState() == GAME_STATE_PRE_GAME
+	   and (bot.announcedRole == nil or bot.announcedRole ~= J.GetPosition(bot))
+	then
+		bot.announcedRole = J.GetPosition(bot)
+		bot:ActionImmediate_Chat(Localization.Get('say_play_pos') .. J.GetPosition(bot), false)
+	end
+
+	-- Close position selection after horn if humans and bots mixed
+	if GetGameMode() ~= GAMEMODE_1V1MID and not isChangePosMessageDone then
+		if DotaTime() >= 0 and teamHumans > 0 and teamBots > 0 then
+			bot:ActionImmediate_Chat(Localization.Get('pos_select_closed'), true)
+			isChangePosMessageDone = true
+		end
 	end
 end

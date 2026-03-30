@@ -1535,36 +1535,47 @@ end
 
 
 --血精石
+-- 7.41: Bloodstone active (Blood Pact) - increases spell lifesteal to 60% for the duration, self-cast
 X.ConsiderItemDesire["item_bloodstone"] = function( hItem )
 
-	if bot:DistanceFromFountain() < 1200 then return BOT_ACTION_DESIRE_NONE end
-
-	local nCastRange = 800
 	local sCastType = 'none'
 	local hEffectTarget = nil
 	local sCastMotive = nil
-	local nInRangeEnmyList = J.GetNearbyHeroes(bot, nCastRange, true, BOT_MODE_NONE )
+	local nInRangeEnmyList = J.GetNearbyHeroes(bot, 1200, true, BOT_MODE_NONE )
 
-	if bot:WasRecentlyDamagedByAnyHero(2.0)
-	and J.GetHP(bot) < 0.3
+	-- Don't use when silenced or mana too low
+	if bot:IsSilenced() or bot:GetMana() < hItem:GetManaCost() then
+		return BOT_ACTION_DESIRE_NONE
+	end
+
+	-- Don't use when no enemies nearby (wasted)
+	if #nInRangeEnmyList == 0 and not J.IsDoingRoshan(bot) and not J.IsDoingTormentor(bot) then
+		return BOT_ACTION_DESIRE_NONE
+	end
+
+	-- Use in teamfights with enemies nearby
+	if J.IsInTeamFight( bot, 1200 ) and #nInRangeEnmyList >= 2
 	then
 		hEffectTarget = bot
-		sCastMotive = "开启血精石" --"亡魂胸针进攻:"..J.Chat.GetNormName( botTarget )
+		sCastMotive = 'Bloodstone: teamfight spell lifesteal'
 		return BOT_ACTION_DESIRE_HIGH, hEffectTarget, sCastType, sCastMotive
 	end
 
-
-	if J.IsGoingOnSomeone( bot )
-	and (#nInRangeEnmyList >= 2 or J.GetHP(bot) < 0.3)
+	-- Use when going on someone and enemies within 1200
+	if J.IsGoingOnSomeone( bot ) and #nInRangeEnmyList >= 1
 	then
-		if bot:WasRecentlyDamagedByAnyHero( 2.0 )
-		then
-			hEffectTarget = bot
-			sCastMotive = "开启血精石" --"亡魂胸针进攻:"..J.Chat.GetNormName( botTarget )
-			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, sCastType, sCastMotive
-		end
+		hEffectTarget = bot
+		sCastMotive = 'Bloodstone: going on target with spell lifesteal'
+		return BOT_ACTION_DESIRE_HIGH, hEffectTarget, sCastType, sCastMotive
 	end
-	
+
+	-- Use when doing Roshan/Tormentor for sustain
+	if J.IsDoingRoshan(bot) or J.IsDoingTormentor(bot)
+	then
+		hEffectTarget = bot
+		sCastMotive = 'Bloodstone: Roshan/Tormentor sustain'
+		return BOT_ACTION_DESIRE_HIGH, hEffectTarget, sCastType, sCastMotive
+	end
 
 	return BOT_ACTION_DESIRE_NONE
 
@@ -1847,6 +1858,8 @@ end
 
 
 --大根
+-- 7.41: Dagon no longer instakills non-ancient creeps and no longer heals the user.
+-- Only target heroes with Dagon.
 X.ConsiderItemDesire["item_dagon"] = function( hItem )
 
 	local nCastRange = hItem:GetCastRange() + aetherRange
@@ -2276,6 +2289,38 @@ X.ConsiderItemDesire["item_ghost"] = function( hItem )
 	local sCastMotive = nil
 	local nInRangeEnmyList = J.GetNearbyHeroes(bot, nCastRange, true, BOT_MODE_NONE )
 
+
+	if bot:GetAttackTarget() == nil
+		or bot:GetHealth() < 500
+	then
+		for _, npcEnemy in pairs( hNearbyEnemyHeroList )
+		do
+			if J.IsValidHero( npcEnemy )
+				and J.CanCastOnMagicImmune( npcEnemy )
+				and J.IsInRange( bot, npcEnemy, npcEnemy:GetAttackRange() + 100 )
+				and npcEnemy:GetAttackTarget() == bot
+				and bot:WasRecentlyDamagedByHero( npcEnemy, 2.0 )
+				and npcEnemy:GetAttackDamage() > bot:GetAttackDamage()
+			then
+				hEffectTarget = npcEnemy
+				sCastMotive = "撤退"..J.Chat.GetNormName( hEffectTarget )
+				return BOT_ACTION_DESIRE_HIGH, hEffectTarget, sCastType, sCastMotive
+			end
+		end
+	end
+
+	return BOT_ACTION_DESIRE_NONE
+
+end
+
+
+--克雷拉斯权杖 (Crellas's Crozier - self-cast ghost form)
+X.ConsiderItemDesire["item_crellas_crozier"] = function( hItem )
+
+	local nCastRange = 800
+	local sCastType = 'none'
+	local hEffectTarget = nil
+	local sCastMotive = nil
 
 	if bot:GetAttackTarget() == nil
 		or bot:GetHealth() < 500
@@ -3767,6 +3812,8 @@ X.ConsiderItemDesire["item_quelling_blade"] = function( hItem )
 end
 
 --刷新球
+-- 7.41: Refresher Orb only refreshes ABILITIES, not items.
+-- Do not add logic that chains Refresher with item re-use (e.g. BKB).
 X.ConsiderItemDesire["item_refresher"] = function( hItem )
 
 	local nCastRange = 1000
@@ -4235,6 +4282,77 @@ end
 X.ConsiderItemDesire["item_spirit_vessel"] = function( hItem )
 
 	return X.ConsiderItemDesire["item_urn_of_shadows"]( hItem )
+
+end
+
+
+--精华蒸馏器
+X.ConsiderItemDesire["item_essence_distiller"] = function( hItem )
+
+	if hItem:GetCurrentCharges() == 0 then return BOT_ACTION_DESIRE_NONE end
+
+	local nCastRange = 950 + aetherRange
+	local sCastType = 'unit'
+	local hEffectTarget = nil
+	local sCastMotive = nil
+	local nInRangeEnmyList = J.GetNearbyHeroes(bot, nCastRange, true, BOT_MODE_NONE )
+
+
+	if J.IsGoingOnSomeone( bot )
+	then
+		if J.IsValidHero( botTarget ) and
+			((J.CanCastOnNonMagicImmune( botTarget )
+				and J.IsInRange( bot, botTarget, nCastRange )
+				and not botTarget:HasModifier( "modifier_item_urn_damage" )
+				and not botTarget:HasModifier( "modifier_item_spirit_vessel_damage" )
+				and not botTarget:HasModifier( "modifier_item_essence_distiller_damage" )
+				and not botTarget:HasModifier( "modifier_arc_warden_tempest_double" )
+				and ( J.GetHP( botTarget ) < 0.95 or J.IsInRange( bot, botTarget, 700 ) ))
+			or botTarget:HasModifier( "modifier_invoker_cold_snap_freeze" )
+		) then
+			hEffectTarget = botTarget
+			sCastMotive = "进攻:"..J.Chat.GetNormName( hEffectTarget )
+			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, sCastType, sCastMotive
+		end
+	end
+
+	if bot:GetActiveMode() ~= BOT_MODE_ROSHAN
+	then
+		local hAllyList = J.GetNearbyHeroes(bot, nCastRange + 80, false, BOT_MODE_NONE )
+		local hNeedHealAlly = nil
+		local nNeedHealAllyHealth = 99999
+		for _, npcAlly in pairs( hAllyList )
+		do
+			if J.IsValid( npcAlly )
+				and not npcAlly:IsIllusion()
+				and npcAlly:DistanceFromFountain() > 800
+				and J.CanCastOnNonMagicImmune( npcAlly )
+				and not npcAlly:WasRecentlyDamagedByAnyHero( 3.1 )
+				and not npcAlly:HasModifier( "modifier_item_spirit_vessel_heal" )
+				and not npcAlly:HasModifier( "modifier_item_urn_heal" )
+				and not npcAlly:HasModifier( "modifier_item_essence_distiller_heal" )
+				and not npcAlly:HasModifier( "modifier_fountain_aura" )
+				and not npcAlly:HasModifier( "modifier_arc_warden_tempest_double" )
+				and npcAlly:OriginalGetMaxHealth() - npcAlly:OriginalGetHealth() > 450
+				and #hNearbyEnemyHeroList == 0
+			then
+				if( npcAlly:OriginalGetHealth() < nNeedHealAllyHealth )
+				then
+					hNeedHealAlly = npcAlly
+					nNeedHealAllyHealth = npcAlly:OriginalGetHealth()
+				end
+			end
+		end
+
+		if( hNeedHealAlly ~= nil )
+		then
+			hEffectTarget = hNeedHealAlly
+			sCastMotive = '治疗:'..J.Chat.GetNormName( hEffectTarget )
+			return BOT_ACTION_DESIRE_HIGH, hEffectTarget, sCastType, sCastMotive
+		end
+	end
+
+	return BOT_ACTION_DESIRE_NONE
 
 end
 
@@ -6823,6 +6941,63 @@ X.ConsiderItemDesire["item_seeds_of_serenity"] = function(hItem)
             return BOT_ACTION_DESIRE_HIGH, bot:GetLocation(), 'ground', nil
         end
     end
+
+	return BOT_ACTION_DESIRE_NONE
+end
+
+-- 7.41 Neutral Items
+
+-- Dagger of Ristul: self-cast, consume 100 HP for +25 damage for 8s, 30s CD
+X.ConsiderItemDesire["item_dagger_of_ristul"] = function(hItem)
+	local sCastType = 'none'
+
+	-- Don't use when low HP (costs 100 HP)
+	if J.GetHP(bot) < 0.4 then return BOT_ACTION_DESIRE_NONE end
+
+	-- Use when going on someone and have enough HP
+	if J.IsGoingOnSomeone(bot)
+	then
+		if J.IsValidTarget(botTarget)
+		and J.IsInRange(bot, botTarget, 800)
+		and J.GetHP(bot) > 0.5
+		then
+			return BOT_ACTION_DESIRE_HIGH, bot, sCastType, nil
+		end
+	end
+
+	-- Use when farming neutrals and healthy
+	if J.IsFarming(bot) and J.IsAttacking(bot)
+	and J.GetHP(bot) > 0.7
+	then
+		local nNeutralCreeps = bot:GetNearbyNeutralCreeps(600)
+		if nNeutralCreeps ~= nil and #nNeutralCreeps >= 2
+		then
+			return BOT_ACTION_DESIRE_HIGH, bot, sCastType, nil
+		end
+	end
+
+	return BOT_ACTION_DESIRE_NONE
+end
+
+-- Stonefeather Satchel: toggle between Feathers (MS) and Rocks (armor), 6s CD
+X.ConsiderItemDesire["item_stonefeather_satchel"] = function(hItem)
+	local sCastType = 'none'
+	local nEnemyHeroes = J.GetNearbyHeroes(bot, 1200, true, BOT_MODE_NONE)
+
+	-- Toggle to Rocks (armor) mode when in danger
+	if #nEnemyHeroes >= 1
+	and (J.IsRetreating(bot) or J.GetHP(bot) < 0.5)
+	and not bot:HasModifier('modifier_item_stonefeather_satchel_rocks')
+	then
+		return BOT_ACTION_DESIRE_HIGH, bot, sCastType, nil
+	end
+
+	-- Toggle to Feathers (MS) mode when safe
+	if #nEnemyHeroes == 0
+	and not bot:HasModifier('modifier_item_stonefeather_satchel_feathers')
+	then
+		return BOT_ACTION_DESIRE_MODERATE, bot, sCastType, nil
+	end
 
 	return BOT_ACTION_DESIRE_NONE
 end

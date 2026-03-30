@@ -47,6 +47,7 @@ sRoleItemsBuyList['pos_1'] = {
 	"item_mjollnir",--
 	"item_broken_satanic",--
 	"item_moon_shard",
+	"item_hydras_breath",--
 	"item_skadi",--
 	"item_travel_boots_2",--
 	"item_ultimate_scepter_2",
@@ -66,6 +67,7 @@ sRoleItemsBuyList['pos_2'] = {
 	"item_mjollnir",--
 	"item_broken_satanic",--
 	"item_moon_shard",
+	"item_hydras_breath",--
 	"item_skadi",--
 	"item_travel_boots_2",--
 	"item_ultimate_scepter_2",
@@ -425,6 +427,8 @@ function X.ConsiderQ()
 	return 0
 end
 
+-- 7.41: Take Aim now has passive attack range (160/240/320/400)
+-- plus an active component that grants bonus range (75/150/225/300) for a duration.
 function X.ConsiderE()
 
 	if not abilityE:IsFullyCastable()

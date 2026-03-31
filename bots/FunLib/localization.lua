@@ -122,7 +122,15 @@ local Localization = {
             "Try to win by typing your poor keyboard with your poor little fingers?",
             "please stfu, it’s for everyone’s sake.",
             "You proofed that this game's matchmaking has no standards, another bot tier player again."
-        }
+        },
+        say_assemble = {"On my way!", "Coming!", "I'm coming, hold on!", "Heading there now!"},
+        say_roshan = {"Let's do Roshan!", "Roshan time!", "Going for Rosh!"},
+        say_push_top = {"Let's push top!", "Pushing top!", "Push top lane!"},
+        say_push_mid = {"Let's push mid!", "Pushing mid!", "Push mid lane!"},
+        say_push_bot = {"Let's push bot!", "Pushing bot!", "Push bot lane!"},
+        say_defend_top = {"Defend top!", "They're pushing top!", "Help top lane!"},
+        say_defend_mid = {"Defend mid!", "They're pushing mid!", "Help mid lane!"},
+        say_defend_bot = {"Defend bot!", "They're pushing bot!", "Help bot lane!"},
     },
     zh = {
         welcome_msgs = {
@@ -248,6 +256,14 @@ local Localization = {
             "请闭嘴，为了大家好。",
             "你证明了这个游戏的匹配没有标准，又一个机器人级别的玩家。"
         },
+        say_assemble = {"我来了！", "马上到！", "等等我，正在赶来！", "正在前往！"},
+        say_roshan = {"打肉山！", "去肉山！", "该打肉山了！"},
+        say_push_top = {"推上路！", "上路推塔！", "一起推上路！"},
+        say_push_mid = {"推中路！", "中路推塔！", "一起推中路！"},
+        say_push_bot = {"推下路！", "下路推塔！", "一起推下路！"},
+        say_defend_top = {"防守上路！", "上路有人推！", "支援上路！"},
+        say_defend_mid = {"防守中路！", "中路有人推！", "支援中路！"},
+        say_defend_bot = {"防守下路！", "下路有人推！", "支援下路！"},
     },
     ru = {
         welcome_msgs = {
@@ -366,6 +382,14 @@ local Localization = {
             "Пожалуйста, заткнись, это для всеобщего блага.",
             "Ты доказал, что матчмейкинг без стандартов, бот-уровень игрока."
         },
+        say_assemble = {"Иду!", "Уже бегу!", "Держитесь, я иду!", "Направляюсь туда!"},
+        say_roshan = {"Идём на Рошана!", "Рошан!", "Берём Роша!"},
+        say_push_top = {"Пушим топ!", "Давайте пушить топ!", "Пуш верхней!"},
+        say_push_mid = {"Пушим мид!", "Давайте пушить мид!", "Пуш центра!"},
+        say_push_bot = {"Пушим бот!", "Давайте пушить бот!", "Пуш нижней!"},
+        say_defend_top = {"Защищаем топ!", "Враги пушат топ!", "Помогите на топе!"},
+        say_defend_mid = {"Защищаем мид!", "Враги пушат мид!", "Помогите на миде!"},
+        say_defend_bot = {"Защищаем бот!", "Враги пушат бот!", "Помогите на боте!"},
     },
     ja = {
         welcome_msgs = {
@@ -484,6 +508,14 @@ local Localization = {
             "黙ってくれ、みんなのためだよ。",
             "君はこのゲームのマッチングに基準がない証拠だよ、ボットプレイヤー。"
         },
+        say_assemble = {"向かってるよ！", "今行く！", "待って、向かってる！", "そっちに行くよ！"},
+        say_roshan = {"ロシャンやろう！", "ロシャンの時間だ！", "ロシャン行くぞ！"},
+        say_push_top = {"トップ押そう！", "トッププッシュ！", "トップレーン押すぞ！"},
+        say_push_mid = {"ミッド押そう！", "ミッドプッシュ！", "ミッドレーン押すぞ！"},
+        say_push_bot = {"ボット押そう！", "ボットプッシュ！", "ボットレーン押すぞ！"},
+        say_defend_top = {"トップ守れ！", "敵がトップ押してる！", "トップ助けて！"},
+        say_defend_mid = {"ミッド守れ！", "敵がミッド押してる！", "ミッド助けて！"},
+        say_defend_bot = {"ボット守れ！", "敵がボット押してる！", "ボット助けて！"},
     },
 }
 

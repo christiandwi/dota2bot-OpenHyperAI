@@ -14,6 +14,7 @@ local Localization = require( GetScriptDirectory()..'/FunLib/localization' )
 local Customize = require(GetScriptDirectory()..'/Customize/general')
 Customize.ThinkLess = Customize.Enable and Customize.ThinkLess or 1
 if GAMEMODE_TURBO == nil then GAMEMODE_TURBO = 23 end
+if GAMEMODE_ARDM == nil then GAMEMODE_ARDM = 20 end
 
 if BotBuild == nil then return end
 
@@ -24,6 +25,64 @@ local sAbilityLevelUpList = BotBuild['sSkillList']
 local RadiantFountain = Vector(-6619, -6336, 384)
 local DireFountain = Vector(6928, 6372, 392)
 
+local bNeedARDMReload = false
+
+-- ARDM: Refresh the bot handle and detect stale hero instances.
+-- Returns true if this script instance should do NOTHING (stale hero from a past life).
+local function RefreshBotHandle()
+	local isStale, freshBot, freshName = J.IsStaleARDMHero(bot, botName)
+	if isStale then
+		print("[ARDM] Stale ability script: this="..botName..", current="..freshName)
+		return true
+	end
+
+	-- Update handle/name if changed (hero swapped in place)
+	if freshName ~= botName then
+		print("[ARDM] Hero swap detected: "..botName.." -> "..freshName)
+		bot = freshBot
+		botName = freshName
+		bNeedARDMReload = true
+	elseif freshBot ~= bot then
+		bot = freshBot
+	end
+
+	-- Reload BotLib when hero changed and is alive (abilities initialized)
+	if bNeedARDMReload and bot:IsAlive() then
+		bNeedARDMReload = false
+		local heroFile = string.gsub(botName, "npc_dota_", "")
+		print("[ARDM] Loading BotLib/"..heroFile..".lua for "..botName)
+		local ok, newBuild = pcall(dofile, GetScriptDirectory().."/BotLib/"..heroFile)
+		if not ok then
+			print("[ARDM] dofile FAILED for "..heroFile..": "..tostring(newBuild))
+		end
+		if ok and newBuild ~= nil and newBuild['sSkillList'] ~= nil and #newBuild['sSkillList'] > 0 then
+			BotBuild = newBuild
+			bDeafaultAbilityHero = BotBuild['bDeafaultAbility']
+			bDeafaultItemHero = BotBuild['bDeafaultItem']
+			sAbilityLevelUpList = BotBuild['sSkillList']
+			print("[ARDM] Loaded BotLib for "..botName.." with "..#sAbilityLevelUpList.." skill entries, first: "..tostring(sAbilityLevelUpList[1]))
+		else
+			local abilityList = J.Skill.GetAbilityList(bot)
+			local talentList = J.Skill.GetTalentList(bot)
+			print("[ARDM] BotLib load failed or empty for "..botName..", abilities: "..#abilityList..", talents: "..#talentList)
+			if #abilityList > 0 then
+				BotBuild = nil
+				bDeafaultAbilityHero = false
+				bDeafaultItemHero = false
+				sAbilityLevelUpList = J.Utils.CombineTablesUnique(talentList, abilityList)
+				print("[ARDM] Using generic build for "..botName.." with "..#sAbilityLevelUpList.." entries")
+			else
+				print("[ARDM] Abilities not ready for "..botName..", retrying next frame")
+				bNeedARDMReload = true
+			end
+		end
+	elseif bNeedARDMReload and not bot:IsAlive() then
+		print("[ARDM] Waiting for "..botName.." to respawn")
+	end
+
+	return false
+end
+
 local function AbilityLevelUpComplement()
 	if GetGameState() ~= GAME_STATE_PRE_GAME
 		and GetGameState() ~= GAME_STATE_GAME_IN_PROGRESS
@@ -31,25 +90,8 @@ local function AbilityLevelUpComplement()
 		return
 	end
 
-	-- ARDM hero swap detection: reload build config when hero changes
-	local currentName = bot:GetUnitName()
-	if currentName ~= botName then
-		print("[ARDM] Hero changed from "..botName.." to "..currentName..", reloading build config")
-		botName = currentName
-		local heroFile = string.gsub(currentName, "npc_dota_", "")
-		local ok, newBuild = pcall(dofile, GetScriptDirectory().."/BotLib/"..heroFile)
-		if ok and newBuild ~= nil then
-			BotBuild = newBuild
-			bDeafaultAbilityHero = BotBuild['bDeafaultAbility']
-			bDeafaultItemHero = BotBuild['bDeafaultItem']
-			sAbilityLevelUpList = BotBuild['sSkillList']
-		else
-			print("[ARDM] No BotLib file for "..currentName..", using generic ability build")
-			BotBuild = nil
-			bDeafaultAbilityHero = false
-			bDeafaultItemHero = false
-			sAbilityLevelUpList = J.Utils.CombineTablesUnique(J.Skill.GetTalentList(bot), J.Skill.GetAbilityList(bot))
-		end
+	if J.CanNotUseAbility(bot) then
+		return
 	end
 
 	if bot:GetLevel() >= 30
@@ -90,12 +132,40 @@ local function AbilityLevelUpComplement()
 
 	local botLevel = bot:GetLevel()
 
+	if GetGameMode() == GAMEMODE_ARDM and bot:GetAbilityPoints() > 0 then
+		print("[ARDM] "..botName.." Lv"..botLevel.." has "..bot:GetAbilityPoints().." ability points, skill list has "..#sAbilityLevelUpList.." entries"
+			..(#sAbilityLevelUpList > 0 and (", next: "..tostring(sAbilityLevelUpList[1])) or ""))
+	end
+
 	if #sAbilityLevelUpList >= 1
 	and bot:GetAbilityPoints() > 0
 	then
 		if J.IsTryingtoUseAbility(bot) then return end
 		local abilityName = sAbilityLevelUpList[1]
+
+		-- Skip nil entries in skill list (can happen with broken talent mappings)
+		if abilityName == nil then
+			print("[WARN] Nil entry in sAbilityLevelUpList for "..botName..", removing")
+			table.remove(sAbilityLevelUpList, 1)
+			return
+		end
+
 		local abilityToLevelup = bot:GetAbilityByName( abilityName )
+
+		-- ARDM: if the ability doesn't exist on this hero, the skill list may have been
+		-- built when the hero was still sleeping/uninitialized. Try to rebuild it.
+		if abilityToLevelup == nil and GetGameMode() == GAMEMODE_ARDM then
+			local abilityList = J.Skill.GetAbilityList(bot)
+			local talentList = J.Skill.GetTalentList(bot)
+			if #abilityList >= 3 then
+				print("[ARDM] Ability '"..abilityName.."' not found on "..botName..", rebuilding skill list (abilities: "..#abilityList..", talents: "..#talentList..")")
+				sAbilityLevelUpList = J.Utils.CombineTablesUnique(talentList, abilityList)
+				return -- retry with fresh list next frame
+			else
+				print("[ARDM] Abilities not ready for "..botName.." ("..#abilityList.."), waiting")
+				return
+			end
+		end
 
 		if abilityName == 'npc_dota_hero_kez'
 		and (abilityToLevelup == nil or abilityToLevelup:IsHidden()) then
@@ -156,24 +226,33 @@ local function AbilityLevelUpComplement()
 		end
 
 		-- fix phoenix_fire_spirits can't upgrade bug.
-		if abilityName == 'phoenix_fire_spirits'
-		and not bot:GetAbilityByName('phoenix_launch_fire_spirit'):IsHidden() then
-			return
+		if abilityName == 'phoenix_fire_spirits' then
+			local hLaunchSpirit = bot:GetAbilityByName('phoenix_launch_fire_spirit')
+			if hLaunchSpirit ~= nil and not hLaunchSpirit:IsHidden() then
+				return
+			end
 		end
 
 		-- fix 'alchemist_unstable_concoction can't upgrade bug.
-		if abilityName == 'alchemist_unstable_concoction'
-		and not bot:GetAbilityByName('alchemist_unstable_concoction_throw'):IsHidden() then
+		if abilityName == 'alchemist_unstable_concoction' then
+			local hConcThrow = bot:GetAbilityByName('alchemist_unstable_concoction_throw')
+			if hConcThrow ~= nil and not hConcThrow:IsHidden() then
+				return
+			end
+		end
+
+		-- ARDM: ability doesn't exist on this hero — skip it
+		if abilityToLevelup == nil then
+			print("[ARDM] Ability "..abilityName.." not found on "..botName..", skipping")
+			table.remove( sAbilityLevelUpList, 1 )
 			return
 		end
 
-		if abilityToLevelup ~= nil
-			and not abilityToLevelup:IsHidden()
+		if not abilityToLevelup:IsHidden()
 		    and botLevel >= abilityToLevelup:GetHeroLevelRequiredToUpgrade()
 			and abilityToLevelup:CanAbilityBeUpgraded()
 			and abilityToLevelup:GetLevel() < abilityToLevelup:GetMaxLevel()
 		then
-			-- print('Trying to upgrade '..abilityToLevelup:GetName())
 			bot:ActionImmediate_LevelAbility(abilityToLevelup:GetName())
 			table.remove( sAbilityLevelUpList, 1 )
 		elseif abilityName == 'generic_hidden' then
@@ -188,7 +267,6 @@ local function AbilityLevelUpComplement()
 			print("[WARN] Level up ability "..abilityName.." for "..botName.." may fail because it was called on ability that's not available or can't get upgraded anymore.")
 			bot:ActionImmediate_LevelAbility(abilityName)
 			table.remove( sAbilityLevelUpList, 1 )
-			-- bot:ActionImmediate_LevelAbility('special_bonus_attributes')
 		else
 			print("[WARN] Skipped to level up ability "..abilityName.." for "..botName.." for this time because it may fail.")
 			if botLevel > 25 then
@@ -200,6 +278,12 @@ local function AbilityLevelUpComplement()
 
 	if botLevel > 25 and botLevel < 30 and bot:GetAbilityPoints() >= 1 and #sAbilityLevelUpList <= 3 then
 		sAbilityLevelUpList = J.Utils.CombineTablesUnique(J.Skill.GetTalentList( bot ), J.Skill.GetAbilityList( bot ))
+	end
+
+	-- ARDM fallback: if skill list is empty but we still have points, rebuild from current abilities
+	if GetGameMode() == GAMEMODE_ARDM and #sAbilityLevelUpList == 0 and bot:GetAbilityPoints() > 0 then
+		print("[ARDM] Skill list exhausted for "..botName.." at Lv"..botLevel.." with "..bot:GetAbilityPoints().." points, rebuilding")
+		sAbilityLevelUpList = J.Utils.CombineTablesUnique(J.Skill.GetTalentList(bot), J.Skill.GetAbilityList(bot))
 	end
 end
 
@@ -8149,6 +8233,7 @@ local function UseGlyph()
 end
 
 function ItemUsageThink()
+	if RefreshBotHandle() then return end
 	if bot:IsInvulnerable() or not bot:IsHero() or not bot:IsAlive() or not string.find(botName, "hero") or bot:IsIllusion() then return end
 	if bot.lastItemFrameProcessTime == nil then bot.lastItemFrameProcessTime = DotaTime() end
 	if DotaTime() > 30 and (DotaTime() - bot.lastItemFrameProcessTime < (bot.frameProcessTime * (1 + Customize.ThinkLess))) then return end
@@ -8157,6 +8242,7 @@ function ItemUsageThink()
 end
 
 function AbilityUsageThink()
+	if RefreshBotHandle() then return end
 	if bot:IsInvulnerable() or not bot:IsHero() or not bot:IsAlive() or not string.find(botName, "hero") or bot:IsIllusion() then return end
 	if bot.lastAbilityFrameProcessTime == nil then bot.lastAbilityFrameProcessTime = DotaTime() end
 	if DotaTime() > 30 and (DotaTime() - bot.lastAbilityFrameProcessTime < (bot.frameProcessTime * (1 + Customize.ThinkLess))) and bot.isBear == nil then return end
@@ -8165,6 +8251,7 @@ function AbilityUsageThink()
 end
 
 function BuybackUsageThink()
+	if RefreshBotHandle() then return end
 	if bot.lastBuybackFrameProcessTime == nil then bot.lastBuybackFrameProcessTime = DotaTime() end
 	if DotaTime() > 30 and (DotaTime() - bot.lastBuybackFrameProcessTime < 2) then return end
 	bot.lastBuybackFrameProcessTime = DotaTime()
@@ -8173,6 +8260,7 @@ function BuybackUsageThink()
 end
 
 function CourierUsageThink()
+	if RefreshBotHandle() then return end
 	if bot.lastCourierFrameProcessTime == nil then bot.lastCourierFrameProcessTime = DotaTime() end
 	if DotaTime() > 30 and (DotaTime() - bot.lastCourierFrameProcessTime < 0.5) then return end
 	bot.lastCourierFrameProcessTime = DotaTime()
@@ -8180,6 +8268,7 @@ function CourierUsageThink()
 end
 
 function AbilityLevelUpThink()
+	if RefreshBotHandle() then return end
 	if bot.lastLevelUpFrameProcessTime == nil then bot.lastLevelUpFrameProcessTime = DotaTime() end
 	if DotaTime() > 30 and (DotaTime() - bot.lastLevelUpFrameProcessTime < 1) then return end
 	bot.lastLevelUpFrameProcessTime = DotaTime()

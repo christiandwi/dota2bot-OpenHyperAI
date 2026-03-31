@@ -398,6 +398,8 @@ local function BuybackUsageComplement()
 		if fDeathTime == 0 then fDeathTime = DotaTime() end
 	end
 
+	if bot:IsAlive() then return end
+
 	if not bot:HasBuyback() then return end
 
 

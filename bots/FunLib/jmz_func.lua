@@ -5409,11 +5409,18 @@ function J.AdjustLocationWithOffsetTowardsFountain(loc, distance)
 end
 
 function J.IsInLaningPhase()
-	return (
-		(J.IsModeTurbo() and DotaTime() < 8 * 60)
-		or DotaTime() < 12 * 60
-	)
-	and GetBot():GetNetWorth() < 5000
+	local nTime = DotaTime()
+	local bTurbo = J.IsModeTurbo()
+
+	-- Hard time floor: always laning phase before 8min (turbo) / 10min (normal)
+	if bTurbo and nTime < 8 * 60 then return true end
+	if not bTurbo and nTime < 10 * 60 then return true end
+
+	-- Soft extension: still laning up to 10min (turbo) / 14min (normal) if networth is low
+	if bTurbo and nTime < 10 * 60 and GetBot():GetNetWorth() < 8000 then return true end
+	if not bTurbo and nTime < 14 * 60 and GetBot():GetNetWorth() < 8000 then return true end
+
+	return false
 end
 
 function J.IsTormentor(nTarget)

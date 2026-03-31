@@ -31,6 +31,27 @@ local function AbilityLevelUpComplement()
 		return
 	end
 
+	-- ARDM hero swap detection: reload build config when hero changes
+	local currentName = bot:GetUnitName()
+	if currentName ~= botName then
+		print("[ARDM] Hero changed from "..botName.." to "..currentName..", reloading build config")
+		botName = currentName
+		local heroFile = string.gsub(currentName, "npc_dota_", "")
+		local ok, newBuild = pcall(dofile, GetScriptDirectory().."/BotLib/"..heroFile)
+		if ok and newBuild ~= nil then
+			BotBuild = newBuild
+			bDeafaultAbilityHero = BotBuild['bDeafaultAbility']
+			bDeafaultItemHero = BotBuild['bDeafaultItem']
+			sAbilityLevelUpList = BotBuild['sSkillList']
+		else
+			print("[ARDM] No BotLib file for "..currentName..", using generic ability build")
+			BotBuild = nil
+			bDeafaultAbilityHero = false
+			bDeafaultItemHero = false
+			sAbilityLevelUpList = J.Utils.CombineTablesUnique(J.Skill.GetTalentList(bot), J.Skill.GetAbilityList(bot))
+		end
+	end
+
 	if bot:GetLevel() >= 30
 		and botName == "npc_dota_hero_bloodseeker"
 	then
@@ -62,7 +83,7 @@ local function AbilityLevelUpComplement()
 		bot.stuckLoc = nil
 	end
 
-	if bot.needRefreshAbilitiesFor737 ~= nil then
+	if bot.needRefreshAbilitiesFor737 ~= nil and BotBuild ~= nil then
 		sAbilityLevelUpList = BotBuild['sSkillList']
 		if not bot.needRefreshAbilitiesFor737 then bot.needRefreshAbilitiesFor737 = nil end
 	end
@@ -3825,7 +3846,7 @@ X.ConsiderItemDesire["item_refresher"] = function( hItem )
 	local nInRangeEnmyList = J.GetNearbyHeroes(bot, nCastRange, true, BOT_MODE_NONE )
 
 	-- if bot has an overrided version of CanUseRefresherShard logic:
-	if BotBuild.CanUseRefresherShard ~= nil and BotBuild.CanUseRefresherShard() then
+	if BotBuild ~= nil and BotBuild.CanUseRefresherShard ~= nil and BotBuild.CanUseRefresherShard() then
 		return BOT_ACTION_DESIRE_HIGH, hEffectTarget, sCastType, sCastMotive
 	end
 
@@ -8140,7 +8161,7 @@ function AbilityUsageThink()
 	if bot.lastAbilityFrameProcessTime == nil then bot.lastAbilityFrameProcessTime = DotaTime() end
 	if DotaTime() > 30 and (DotaTime() - bot.lastAbilityFrameProcessTime < (bot.frameProcessTime * (1 + Customize.ThinkLess))) and bot.isBear == nil then return end
 	bot.lastAbilityFrameProcessTime = DotaTime()
-	if not J.IsNoAbilityIllution(bot) then BotBuild.SkillsComplement() end
+	if BotBuild ~= nil and not J.IsNoAbilityIllution(bot) then BotBuild.SkillsComplement() end
 end
 
 function BuybackUsageThink()

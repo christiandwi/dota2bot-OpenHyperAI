@@ -2256,6 +2256,95 @@ X.ConsiderItemDesire["item_flask"] = function( hItem )
 
 end
 
+-- Healing Lotus helper (item_famango / item_great_famango / item_greater_famango)
+-- All three restore HP+mana and can target allies. Differ by thresholds and priority.
+-- Thresholds use REMAINING ratios (0.0-1.0) not absolute missing values, because
+-- a hero at 30% HP is critical regardless of their max HP pool.
+local function ConsiderHealingLotus(hItem, sLabel, nSelfHPRatio, nSelfMPRatio, nAllyHPRatio, nFountainDist, bCoresDrop, bEmergency, bPrioritizeCores)
+	if bot:DistanceFromFountain() < nFountainDist then return BOT_ACTION_DESIRE_NONE end
+
+	local sCastType = 'unit'
+	local nInRangeEnmyList = J.GetNearbyHeroes(bot, 900, true, BOT_MODE_NONE)
+	local botHP = J.GetHP(bot)
+	local botMP = bot:GetMaxMana() > 0 and (bot:GetMana() / bot:GetMaxMana()) or 1
+
+	-- Cores drop normal/great lotus after 30min (not worth the slot late game)
+	if bCoresDrop and DotaTime() > 30 * 60 and J.IsCore(bot) then
+		return BOT_ACTION_DESIRE_NONE
+	end
+
+	-- Emergency self-use in combat (greater lotus only)
+	if bEmergency then
+		if botHP < 0.35 or (botHP < 0.5 and botMP < 0.3) then
+			if J.IsRetreating(bot) or J.IsGoingOnSomeone(bot) or #nInRangeEnmyList >= 1 then
+				return BOT_ACTION_DESIRE_HIGH, bot, sCastType, 'Emergency self ('..sLabel..')'
+			end
+		end
+	end
+
+	-- Use on self when safe and HP or mana is below threshold
+	if (botHP < nSelfHPRatio or botMP < nSelfMPRatio)
+		and #nInRangeEnmyList == 0
+		and not bot:WasRecentlyDamagedByAnyHero(2.2)
+		and not bot:HasModifier("modifier_flask_healing")
+		and not bot:HasModifier("modifier_filler_heal")
+	then
+		return BOT_ACTION_DESIRE_HIGH, bot, sCastType, 'Self heal ('..sLabel..')'
+	end
+
+	-- Use on nearby ally who is low on HP
+	local hAllyList = J.GetAlliesNearLoc(bot:GetLocation(), 700)
+	local hBestAlly = nil
+	local nBestScore = 0
+	for _, npcAlly in pairs(hAllyList) do
+		if J.IsValid(npcAlly) and npcAlly ~= bot
+			and not npcAlly:IsIllusion()
+			and not npcAlly:HasModifier("modifier_flask_healing")
+			and not npcAlly:HasModifier("modifier_filler_heal")
+			and (bEmergency or not npcAlly:WasRecentlyDamagedByAnyHero(3.0))
+		then
+			local nAllyHP = npcAlly:GetHealth() / npcAlly:GetMaxHealth()
+			local nAllyMP = npcAlly:GetMaxMana() > 0 and (npcAlly:GetMana() / npcAlly:GetMaxMana()) or 1
+			if nAllyHP < nAllyHPRatio or nAllyMP < nAllyHPRatio then
+				-- Score: lower HP = higher priority. Cores get bonus.
+				local nScore = (1 - nAllyHP) + (1 - nAllyMP) * 0.5
+				if bPrioritizeCores and J.IsCore(npcAlly) then nScore = nScore * 1.5 end
+				if nScore > nBestScore then
+					hBestAlly = npcAlly
+					nBestScore = nScore
+				end
+			end
+		end
+	end
+	if hBestAlly ~= nil and (bEmergency or #nInRangeEnmyList == 0) then
+		return BOT_ACTION_DESIRE_HIGH, hBestAlly, sCastType, 'Heal ally ('..sLabel..'): '..J.Chat.GetNormName(hBestAlly)
+	end
+
+	return BOT_ACTION_DESIRE_NONE
+end
+
+--[[
+  Ally scoring uses (1 - HP%) + (1 - MP%) * 0.5 — a hero at 20% HP and 50% MP scores much higher than one at 80% HP and 10% MP, reflecting that HP is more critical than mana.
+  ┌────────────────────────┬───────┬─────────────┬───────────────────────────────┐
+  │                        │ Lotus │ Great Lotus │         Greater Lotus         │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Self use when HP below │ 70%   │ 60%         │ 50%                           │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Self use when MP below │ 50%   │ 40%         │ 30%                           │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Ally use when HP below │ 60%   │ 50%         │ 50%                           │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Emergency combat use   │ no    │ no          │ yes (HP<35% or HP<50%+MP<30%) │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Prioritize cores       │ no    │ no          │ yes (1.5x score)              │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Cores drop after 30min │ yes   │ yes         │ no                            │
+  └────────────────────────┴───────┴─────────────┴───────────────────────────────┘
+]]
+X.ConsiderItemDesire["item_famango"]         = function(h) return ConsiderHealingLotus(h, "lotus",         0.7, 0.5, 0.6, 3000, true,  false, false) end
+X.ConsiderItemDesire["item_great_famango"]   = function(h) return ConsiderHealingLotus(h, "great lotus",   0.6, 0.4, 0.5, 3000, true,  false, false) end
+X.ConsiderItemDesire["item_greater_famango"] = function(h) return ConsiderHealingLotus(h, "greater lotus", 0.5, 0.3, 0.5, 1200, false, true,  true)  end
+
 --推推
 X.ConsiderItemDesire["item_force_staff"] = function( hItem )
 

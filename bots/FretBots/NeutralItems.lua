@@ -34,6 +34,32 @@ end
 	return nil
 end
 
+-- Returns a pair of bots (one per team) that share the same position
+-- and both need an item of the given tier. Used to give items to
+-- mirrored positions simultaneously so neither team gets an advantage.
+function NeutralItems:GetMatchedPairForTier(tier)
+	-- Build lookup: position -> bot, per team
+	local byPos = { [2] = {}, [3] = {} }
+	for team = 2, 3 do
+		for _, bot in ipairs(AllBots[team]) do
+			if bot.stats and bot.stats.role then
+				byPos[team][bot.stats.role] = bot
+			end
+		end
+	end
+	-- Find first position where both sides need this tier (pos 1 = carry first)
+	for pos = 1, 5 do
+		local radBot = byPos[2][pos]
+		local direBot = byPos[3][pos]
+		if radBot and direBot
+		and tier > (radBot.stats.neutralTier or 0)
+		and tier > (direBot.stats.neutralTier or 0) then
+			return radBot, direBot
+		end
+	end
+	return nil, nil
+end
+
 -- Gives a neutral item to a unit, returns name of previous item
 -- if there was one.
 function NeutralItems:CreateOnUnit(unit, item)
@@ -328,16 +354,24 @@ function NeutralItems:CloseBotFindTier(tier, team)
 end
 
 -- Sets all bots to find tier 1 items.
+-- Matched positions across teams get the SAME variance so they trigger at the same time.
 function NeutralItems:InitializeFindTimings()
+	-- Generate one variance per position (1-5) so both teams share the same timing
+	local posVariance = {}
+	for pos = 1, 5 do
+		posVariance[pos] = Utilities:GetIntegerVariance(Settings.neutralItems.variance)
+	end
+
 	for team = 2, 3 do
 		for _, bot in ipairs(AllBots[team]) do
 			if type(bot) == "table" then
-				local variance = Utilities:GetIntegerVariance(Settings.neutralItems.variance)
+				local pos = bot.stats.role or 1
+				local variance = posVariance[pos] or 0
 				local difficultyShift = NeutralItems:GetTimingDifficultyScaleShift(1)
-					bot.stats.neutralsFound = 0
-					bot.stats.neutralTiming = Settings.neutralItems.timings[1] + variance + difficultyShift
+				bot.stats.neutralsFound = 0
+				bot.stats.neutralTiming = Settings.neutralItems.timings[1] + variance + difficultyShift
 				if bot.stats.neutralTiming < 0 then bot.stats.neutralTiming = 0 end
-				local msg = bot.stats.name..': Initialized Neutral Timing for Tier 1: '..bot.stats.neutralTiming..' (shift: '..difficultyShift..', var: '..variance..')'
+				local msg = bot.stats.name..' (pos'..pos..'): Initialized Neutral Timing for Tier 1: '..bot.stats.neutralTiming..' (shift: '..difficultyShift..', var: '..variance..')'
 				Debug:Print(msg)
 			else
 				print('[ERROR] failed to process bot: '..tostring(bot)..', team: '..team)

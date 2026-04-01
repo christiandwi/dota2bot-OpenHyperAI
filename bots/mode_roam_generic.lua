@@ -24,14 +24,14 @@ local ConsiderHeroSpecificRoaming = {}
 
 local laneToGank = nil
 local lastGankDecisionTime = 0
-local gankDecisionHoldTime = 1.5 * 60 -- cant change dicision within this time
+local gankDecisionHoldTime = 30 -- 30s commitment to a gank decision (was 90s — too long, bots wasted laning time)
 local TwinGates = J.Utils.GameStates.twinGates
 local targetGate
 local gateWarp = bot:GetAbilityByName("twin_gate_portal_warp")
 local enableGateUsage = false -- twin_gate_portal_warp to be fixed
 local arriveGankLocTime = 0
-local gankTimeAfterArrival = 0.55 * 60 -- stay to roam after arriving the location
-local gankGapTime = 6 * 60 -- don't roam again within this duration after roaming once.
+local gankTimeAfterArrival = 15 -- 15s stay at gank location (was 33s — too long doing nothing)
+local gankGapTime = 3 * 60 -- 3 min between ganks (was 6 min — too restrictive)
 local lastStaticLinkDebuffStack = 0
 local AnyUnitAffectedByChainFrost = false
 local HasPossibleWallOfReplicaAround = false
@@ -954,6 +954,13 @@ end
 
 function ThinkActualGankingInLanes()
 	if laneToGank ~= nil then
+		-- Abort gank if the target lane no longer has enemies (they left)
+		local nEnemiesInGankLane = J.GetEnemyCountInLane(laneToGank)
+		if nEnemiesInGankLane == 0 then
+			laneToGank = nil
+			return
+		end
+
 		local targetLoc = GetLaneFrontLocation(GetTeam(), laneToGank, -300)
 		local distanceToGankLoc = GetUnitToLocationDistance(bot, targetLoc)
 		if distanceToGankLoc > 5000 then
@@ -1003,58 +1010,96 @@ end
 
 function CheckLaneToGank(botPosition)
 
+	-- Don't gank if enemies are already near us (we're in a fight)
 	if #J.GetEnemiesNearLoc(bot:GetLocation(), 800) > 0 then
 		return BOT_MODE_DESIRE_NONE
 	end
 
+	-- If we committed to a gank, REVALIDATE before continuing
+	-- (enemy may have left the lane since we decided)
 	if DotaTime() - lastGankDecisionTime <= gankDecisionHoldTime and laneToGank ~= nil then
+		local nEnemiesStillThere = J.GetEnemyCountInLane(laneToGank)
+		if nEnemiesStillThere == 0 then
+			-- Enemy left — cancel the gank, go back to what we were doing
+			laneToGank = nil
+			lastGankDecisionTime = 0
+			return BOT_MODE_DESIRE_NONE
+		end
 		return BOT_ACTION_DESIRE_VERYHIGH
 	end
 
-	local botLvlTooLow = (J.GetPosition(bot) == 1 and botLevel < 6) or
-		(J.GetPosition(bot) == 2 and botLevel < 6) or
-		(J.GetPosition(bot) == 3 and botLevel < 5) or
-		(J.GetPosition(bot) == 4 and botLevel < 4) or
-		(J.GetPosition(bot) == 5 and botLevel < 4)
+	-- Cores should NOT gank during laning — they lose too much farm/XP
+	local nPos = J.GetPosition(bot)
+	if J.IsInLaningPhase() then
+		if nPos == 1 or nPos == 2 then
+			return BOT_MODE_DESIRE_NONE
+		end
+	end
 
-	if J.IsInLaningPhase()
-		and ((DotaTime() - lastGankDecisionTime < gankGapTime and lastGankDecisionTime ~= 0)
-			or botLvlTooLow) then
+	local botLvlTooLow = (nPos == 1 and botLevel < 10) or
+		(nPos == 2 and botLevel < 8) or
+		(nPos == 3 and botLevel < 6) or
+		(nPos == 4 and botLevel < 4) or
+		(nPos == 5 and botLevel < 3)
+
+	if (DotaTime() - lastGankDecisionTime < gankGapTime and lastGankDecisionTime ~= 0)
+		or botLvlTooLow then
 		return BOT_MODE_DESIRE_NONE
 	end
 
-	if not HasSufficientMana(300) then -- idelaly should have mana at least able to use 2 abilities + tp.
+	if not HasSufficientMana(300) then
 		return BOT_MODE_DESIRE_NONE
 	end
-	for _, lane in pairs(laneAndT1s)
-	do
+
+	-- Evaluate each lane for gank viability
+	local bestLane = nil
+	local bestDesire = 0
+
+	for _, lane in pairs(laneAndT1s) do
 		local enemyCountInLane = J.GetEnemyCountInLane(lane[1])
-		if enemyCountInLane > 0
-		then
+		if enemyCountInLane > 0 then
 			local tTower = GetTower(GetTeam(), lane[2])
 			if tTower ~= nil then
 				local laneFront = GetLaneFrontLocation(GetTeam(), lane[1], 0)
 				local laneFrontToT1Dist = GetUnitToLocationDistance(tTower, laneFront)
 				local nInRangeAlly = J.GetAlliesNearLoc(laneFront, 1200)
+				local botDistToLane = GetUnitToLocationDistance(bot, laneFront)
 
-				if enableGateUsage
-				and laneFrontToT1Dist < 800
-				then
-					targetGate = GetGateNearLane(laneFront)
-					if enemyCountInLane >= #nInRangeAlly
-					then
-						laneToGank = lane[1]
-						return RemapValClamped(GetUnitToUnitDistance(bot, targetGate), 5000, 600, BOT_ACTION_DESIRE_HIGH, BOT_ACTION_DESIRE_ABSOLUTE )
+				-- Skip this lane if it's too far (> 4000 units — would take too long)
+				if botDistToLane > 4000 and not J.HasItem(bot, 'item_tpscroll') then
+					goto continue_lane
+				end
+
+				-- Skip if this is our own assigned lane (don't "gank" our own lane)
+				if lane[1] == bot:GetAssignedLane() then
+					goto continue_lane
+				end
+
+				-- Better gank conditions: enemy is pushed forward (closer to our tower)
+				-- AND we have at least 1 ally there to help
+				local bEnemyOverextended = laneFrontToT1Dist < 2500
+				local bAllyPresent = #nInRangeAlly >= 1
+
+				if bEnemyOverextended and bAllyPresent then
+					local desire = RemapValClamped(botDistToLane, 4000, 600, BOT_ACTION_DESIRE_MODERATE, BOT_ACTION_DESIRE_HIGH)
+					-- Bonus desire if enemy is outnumbered
+					if enemyCountInLane <= #nInRangeAlly then
+						desire = desire + 0.1
+					end
+					if desire > bestDesire then
+						bestDesire = desire
+						bestLane = lane[1]
 					end
 				end
-
-				if enemyCountInLane >= 1 then
-					laneToGank = lane[1]
-					return RemapValClamped(laneFrontToT1Dist, 5000, 600, BOT_ACTION_DESIRE_HIGH, BOT_ACTION_DESIRE_ABSOLUTE * 0.96 )
-				end
 			end
-
 		end
+		::continue_lane::
+	end
+
+	if bestLane then
+		laneToGank = bestLane
+		lastGankDecisionTime = DotaTime()
+		return Clamp(bestDesire, 0, BOT_ACTION_DESIRE_VERYHIGH)
 	end
 
 	return BOT_MODE_DESIRE_NONE

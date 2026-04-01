@@ -460,7 +460,7 @@ function ItemPurchaseThink()
 		local tSkipBoots = {
 			item_boots = true, item_phase_boots = true, item_power_treads = true,
 			item_tranquil_boots = true, item_arcane_boots = true,
-			item_guardian_greaves = true, item_boots_of_bearing = true,
+			-- greaves/bearing/travel are intentional upgrades, don't skip
 		}
 
 		bot.purchaseListInReverseOrder = {}
@@ -552,6 +552,72 @@ function ItemPurchaseThink()
 		bot.currBuyingRequiredCounts = nil
 		bot.rebuildCount = 0
 		bot.countInvCheck = 0
+	end
+
+	-- Detect position swap from !pos command: rebuild purchase list for new role
+	if bot.needPurchaseRebuild then
+		bot.needPurchaseRebuild = nil
+		local nNewPos = J.GetPosition(bot)
+		print("[PosSwap] Item purchase rebuild for "..botName.." -> pos"..nNewPos)
+
+		-- Reload BotBuild to get new role's item list
+		local heroFile = string.gsub(botName, "npc_dota_", "")
+		local ok, newBuild = pcall(dofile, GetScriptDirectory().."/BotLib/"..heroFile)
+		if ok and newBuild ~= nil and newBuild['sBuyList'] ~= nil then
+			BotBuild = newBuild
+			sPurchaseList = newBuild['sBuyList']
+			sItemSellList = newBuild['sSellList']
+		end
+
+		-- Rebuild purchase list, skipping:
+		-- 1. Items the bot already owns (final item in inventory)
+		-- 2. Items whose ALL components the bot already has (final item effectively built)
+		-- 3. Duplicate boots if bot already has boots
+		if sPurchaseList then
+			local bHasBoots = Item.HasBuyBoots(bot)
+				or Item.HasItem(bot, 'item_guardian_greaves')
+				or Item.HasItem(bot, 'item_travel_boots')
+				or Item.HasItem(bot, 'item_travel_boots_2')
+				or Item.HasItem(bot, 'item_boots_of_bearing')
+			local tSkipBoots = {
+				item_boots = true, item_phase_boots = true, item_power_treads = true,
+				item_tranquil_boots = true, item_arcane_boots = true,
+				-- greaves/bearing/travel are intentional upgrades, don't skip
+			}
+
+			bot.purchaseListInReverseOrder = {}
+			local idx = 0
+			for i = #sPurchaseList, 1, -1 do
+				local itemName = sPurchaseList[i]
+				local bSkip = false
+
+				-- Already own it
+				if Item.IsItemInHero(itemName) then
+					bSkip = true
+				-- Duplicate boots
+				elseif bHasBoots and tSkipBoots[itemName] then
+					bSkip = true
+				-- Early game items past laning (same as ARDM)
+				elseif DotaTime() > 10 * 60 and tARDMNeverRebuy[itemName] then
+					bSkip = true
+				end
+
+				if not bSkip then
+					idx = idx + 1
+					bot.purchaseListInReverseOrder[idx] = itemName
+				end
+			end
+		end
+
+		-- Reset purchase state machine
+		bot.currBuyingItemInPurchaseList = nil
+		bot.currBuyingBasicItem = nil
+		bot.currBuyingBasicItemList = {}
+		bot.currBuyingBasicItemRefList = {}
+		bot.currBuyingRequiredCounts = nil
+		bot.rebuildCount = 0
+		bot.countInvCheck = 0
+		print("[PosSwap] Purchase list rebuilt with "..#bot.purchaseListInReverseOrder.." items")
 	end
 
 	if bot.lastItemPurchaseFrameProcessTime == nil then bot.lastItemPurchaseFrameProcessTime = currentTime end
@@ -1046,21 +1112,21 @@ function ItemPurchaseThink()
 		return
 	end
 
-	-- All boots types (excluding travel boots which involve selling old boots to upgrade)
-	local tAllBoots = {
+	-- Boots that should be skipped if bot already has different boots.
+	-- Excludes upgrade boots (greaves, bearing, travel) — these are intentional
+	-- upgrades from existing boots and should NOT be skipped.
+	local tBasicBootsOnly = {
 		item_boots = true, item_phase_boots = true, item_power_treads = true,
 		item_tranquil_boots = true, item_arcane_boots = true,
-		item_guardian_greaves = true, item_boots_of_bearing = true,
 	}
 
 	if bot.currBuyingItemInPurchaseList == nil
 	and #bot.currBuyingBasicItemList == 0
 	then
-		-- Skip items that shouldn't be purchased (e.g. duplicate boots)
+		-- Skip duplicate basic boots (not upgrades like greaves/travel/bearing)
 		while #bot.purchaseListInReverseOrder > 0 do
 			local nextItem = bot.purchaseListInReverseOrder[#bot.purchaseListInReverseOrder]
-			-- Skip boots if we already have any boots (except travel boots upgrade)
-			if tAllBoots[nextItem] and (Item.HasBuyBoots(bot)
+			if tBasicBootsOnly[nextItem] and (Item.HasBuyBoots(bot)
 				or Item.HasItem(bot, 'item_guardian_greaves')
 				or Item.HasItem(bot, 'item_travel_boots')
 				or Item.HasItem(bot, 'item_travel_boots_2')

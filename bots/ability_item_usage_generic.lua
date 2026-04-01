@@ -26,6 +26,46 @@ local RadiantFountain = Vector(-6619, -6336, 384)
 local DireFountain = Vector(6928, 6372, 392)
 
 local bNeedARDMReload = false
+local nLastKnownPosition = nil  -- tracks bot's position for !pos swap detection
+
+-- Reload BotBuild for the current hero+role (shared by ARDM swap and !pos swap)
+local function ReloadBotBuild(reason)
+	local heroFile = string.gsub(botName, "npc_dota_", "")
+	print("[Reload] "..reason.." for "..botName..", loading BotLib/"..heroFile)
+	local ok, newBuild = pcall(dofile, GetScriptDirectory().."/BotLib/"..heroFile)
+	if ok and newBuild ~= nil then
+		BotBuild = newBuild
+		bDeafaultAbilityHero = BotBuild['bDeafaultAbility']
+		bDeafaultItemHero = BotBuild['bDeafaultItem']
+		if newBuild['sSkillList'] ~= nil and #newBuild['sSkillList'] > 0 then
+			local fullList = newBuild['sSkillList']
+
+			-- Strip entries from the front that the bot has already learned.
+			-- The bot may have leveled abilities in a different order (old role),
+			-- so entries at the front of the new list may reference abilities that
+			-- are already at max level or can't be upgraded further.
+			local botLevel = bot:GetLevel()
+			local nPointsSpent = botLevel - bot:GetAbilityPoints()
+			-- Remove the first N entries where N = ability points already spent
+			-- This aligns the list with the bot's current level progression
+			local trimmed = {}
+			for i = nPointsSpent + 1, #fullList do
+				table.insert(trimmed, fullList[i])
+			end
+
+			if #trimmed > 0 then
+				sAbilityLevelUpList = trimmed
+			else
+				-- All entries consumed, fall back to generic
+				sAbilityLevelUpList = J.Utils.CombineTablesUnique(
+					J.Skill.GetTalentList(bot), J.Skill.GetAbilityList(bot))
+			end
+			print("[Reload] Skill list: "..#sAbilityLevelUpList.." entries remaining (spent "..nPointsSpent.." points)")
+		end
+	else
+		print("[Reload] dofile FAILED for "..heroFile..": "..tostring(newBuild))
+	end
+end
 
 -- ARDM: Refresh the bot handle and detect stale hero instances.
 -- Returns true if this script instance should do NOTHING (stale hero from a past life).
@@ -92,6 +132,18 @@ local function AbilityLevelUpComplement()
 
 	if J.CanNotUseAbility(bot) then
 		return
+	end
+
+	-- Detect position change from !pos command: reload BotBuild for new role
+	local nCurrentPos = J.GetPosition(bot)
+	if nLastKnownPosition == nil then
+		nLastKnownPosition = nCurrentPos
+	elseif nCurrentPos ~= nLastKnownPosition then
+		print("[PosSwap] "..botName.." position changed: pos"..nLastKnownPosition.." -> pos"..nCurrentPos)
+		nLastKnownPosition = nCurrentPos
+		ReloadBotBuild("Position swap to pos"..nCurrentPos)
+		-- Signal item purchase to also rebuild
+		bot.needPurchaseRebuild = true
 	end
 
 	if bot:GetLevel() >= 30

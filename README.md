@@ -156,6 +156,61 @@ root: <Steam/steamapps/common/dota 2 beta/game/dota/scripts/vscripts>
 
 ---
 
+## Offline / LAN Play
+
+You can start a bot game directly from the console without network or clicking UI buttons — useful for offline play, LAN parties, or quick testing.
+
+### Setup
+
+1. Create a file called `oha_bot.cfg` in your Dota 2 cfg folder:
+   ```
+   Steam/steamapps/common/dota 2 beta/game/dota/cfg/oha_bot.cfg
+   ```
+
+2. Paste the following config:
+   ```
+   sv_lan 1
+   dota_wait_for_players_to_load 10
+   dota_wait_for_players_completed_delay 10
+   dota_wait_for_players_failed_delay 10
+   dota_wait_for_players_to_load_timeout 10
+   dota_bot_practice_script 3246316298
+   dota_bot_set_difficulty 4
+   dota_bot_match_difficulty 4
+   dota_bot_practice_difficulty 4
+   dota_bot_practice_gamemode 1
+   dota_bot_match_use_matchmaking 1
+   dota_bot_practice_start 1
+   map dota
+   ```
+
+3. In Dota 2, open the console (`~` key) and run:
+   ```
+   exec oha_bot.cfg
+   ```
+
+The game starts immediately with OHA bots. You can change `dota_bot_practice_gamemode` to select different modes (1 = All Pick, 2 = Captain's Mode, 4 = Random Draft, 22 = All Pick ranked, etc.).
+
+### Inviting Friends on LAN
+
+Friends on the same local network can join your offline bot game:
+
+1. **Host** runs `exec oha_bot.cfg` to start the game.
+2. **Host** finds their local IP address:
+   - **Windows**: Open Command Prompt, type `ipconfig`, look for `IPv4 Address` (e.g., `192.168.1.100`)
+   - **Mac/Linux**: Open Terminal, type `ifconfig` or `ip addr`, look for your LAN IP
+3. **Friends** open the Dota 2 console and type:
+   ```
+   connect 192.168.1.100
+   ```
+   (Replace with the host's actual IP address)
+
+> **Note:** All players must be on the same local network (same Wi-Fi or connected via Ethernet). The host's firewall may need to allow incoming connections on Dota 2's port (default: 27015).
+
+> **Works fully offline!** The `sv_lan 1` command runs a local server — no internet or Steam login required to play. Players can connect in Steam offline mode. The only step that needs internet is the initial Workshop download of the bot scripts.
+
+---
+
 ## Contribute
 
 - Contributions welcome on [GitHub](https://github.com/forest0xia/dota2bot-OpenHyperAI)

@@ -393,6 +393,15 @@ function GetDesireHelper()
 			if preferedCamp == nil then preferedCamp = J.Site.GetClosestNeutralSpwan(bot, availableCamp);end
 
 			if preferedCamp ~= nil then
+				-- Don't farm a camp where an ally is already farming
+				local nCampAllies = J.GetAlliesNearLoc(preferedCamp.cattr.location, 800)
+				for _, ally in pairs(nCampAllies) do
+					if ally ~= bot and J.IsValidHero(ally) and not ally:IsIllusion()
+					and J.IsFarming(ally) then
+						return BOT_MODE_DESIRE_NONE
+					end
+				end
+
 				if not J.Site.IsModeSuitableToFarm(bot)
 				then
 					return BOT_MODE_DESIRE_NONE;
@@ -567,6 +576,27 @@ function Think()
 		local targetFarmLoc = preferedCamp.cattr.location;
 		local cDist = GetUnitToLocationDistance(bot, targetFarmLoc);
 		local nNeutrals = bot:GetNearbyCreeps(900, true);
+
+		-- Don't steal farm from an ally already at this camp
+		local nAllyNearCamp = J.GetAlliesNearLoc(targetFarmLoc, 800)
+		local bAllyFarming = false
+		for _, ally in pairs(nAllyNearCamp) do
+			if ally ~= bot and J.IsValidHero(ally) and not ally:IsIllusion()
+			and J.IsFarming(ally) and J.IsAttacking(ally) then
+				bAllyFarming = true
+				break
+			end
+		end
+		if bAllyFarming and cDist > 400 then
+			-- Pick a different camp instead
+			J.Role['availableCampTable'], preferedCamp = J.Site.UpdateAvailableCamp(bot, preferedCamp, J.Role['availableCampTable']);
+			availableCamp = J.Role['availableCampTable']
+			preferedCamp = J.Site.GetClosestNeutralSpwan(bot, availableCamp)
+			if preferedCamp == nil then return end
+			targetFarmLoc = preferedCamp.cattr.location
+			cDist = GetUnitToLocationDistance(bot, targetFarmLoc)
+			nNeutrals = bot:GetNearbyCreeps(900, true)
+		end
 
 		if #nNeutrals >= 3 and cDist <= 600 and cDist > 240
 		   and ( bot:GetLevel() >= 10 or not nNeutrals[1]:IsAncientCreep())

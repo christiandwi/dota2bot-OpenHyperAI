@@ -114,11 +114,20 @@ local tARDMNeverRebuy = {
 }
 
 local function _stillNeeds(itemName)
-	-- Don't buy basic boots if we already have any upgraded boots
-	if itemName == 'item_boots' and Item.HasBuyBoots(bot) then
-		-- Exception: building travel boots requires selling old boots + buying new boots component
-		if bot.currBuyingItemInPurchaseList ~= 'item_travel_boots'
-		and bot.currBuyingItemInPurchaseList ~= 'item_travel_boots_2' then
+	-- Don't buy a second pair of basic boots if we already have upgraded boots.
+	-- BUT allow buying item_boots when it's a COMPONENT of the current build target
+	-- (e.g., building power_treads needs item_boots as a component — don't skip it).
+	if itemName == 'item_boots' then
+		local currentTarget = bot.currBuyingItemInPurchaseList
+		-- Only skip if we have upgraded boots AND the current target is NOT a boots upgrade
+		-- (i.e., we're not building treads/arcane/tranquil/phase from basic boots)
+		local tBootsUpgrades = {
+			item_power_treads = true, item_phase_boots = true,
+			item_arcane_boots = true, item_tranquil_boots = true,
+			item_travel_boots = true, item_travel_boots_2 = true,
+			item_guardian_greaves = true, item_boots_of_bearing = true,
+		}
+		if Item.HasBootsInMainSolt(bot) and not tBootsUpgrades[currentTarget] then
 			return false
 		end
 	end

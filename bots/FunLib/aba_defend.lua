@@ -201,7 +201,7 @@ local function __TS__ArrayForEach(self, callbackFn, thisArg)
 end
 -- End of Lua Library inline imports
 local ____exports = {}
-local updateDefendGameStateCache, updateDefendLocationStateCache, updateDefendUnitStateCache, _q, _keyLoc, _recentHeroCountNear, IsValidBuildingTarget, IsBaseThreatActive, WeightedEnemiesAroundLocation, GetThreatenedLane, GetClosestAllyPos, IsThereNoTeammateTravelBootsDefender, GetHighGroundEdgeWaitPoint, ConsiderPingedDefend, okLoc, Localization, PING_DELTA, MAX_DESIRE_CAP, BASE_THREAT_RADIUS, BASE_THREAT_HOLD, CACHE_ENEMY_AROUND_LOC_HZ, CACHE_LASTSEEN_WINDOW, nTeam, defendLoc, weAreStronger, nInRangeAlly, nInRangeEnemy, _threatLaneSticky, distanceToLane, baseThreatUntil, fTraveBootsDefendTime, _cacheEnemyAroundLoc, DEFEND_CACHE_TTL, defendGameStateCache, defendLocationStateCache, defendUnitStateCache
+local getDefendState, updateDefendGameStateCache, updateDefendLocationStateCache, updateDefendUnitStateCache, _q, _keyLoc, _recentHeroCountNear, IsValidBuildingTarget, IsBaseThreatActive, WeightedEnemiesAroundLocation, GetThreatenedLane, GetClosestAllyPos, IsThereNoTeammateTravelBootsDefender, GetHighGroundEdgeWaitPoint, ConsiderPingedDefend, okLoc, Localization, PING_DELTA, MAX_DESIRE_CAP, BASE_THREAT_RADIUS, BASE_THREAT_HOLD, CACHE_ENEMY_AROUND_LOC_HZ, CACHE_LASTSEEN_WINDOW, nTeam, _threatLaneSticky, baseThreatUntil, fTraveBootsDefendTime, _cacheEnemyAroundLoc, DEFEND_CACHE_TTL, defendGameStateCache, defendLocationStateCache, defendUnitStateCache
 local jmz = require(GetScriptDirectory().."/FunLib/jmz_func")
 local ____dota = require(GetScriptDirectory().."/ts_libs/dota/index")
 local Barracks = ____dota.Barracks
@@ -215,6 +215,18 @@ local ____native_2Doperators = require(GetScriptDirectory().."/ts_libs/utils/nat
 local add = ____native_2Doperators.add
 local ____utils = require(GetScriptDirectory().."/FunLib/utils")
 local GetLocationToLocationDistance = ____utils.GetLocationToLocationDistance
+function getDefendState(bot)
+    if not bot._defend then
+        bot._defend = {
+            defendLoc = GetLaneFrontLocation(nTeam, Lane.Mid, 0),
+            weAreStronger = false,
+            nInRangeAlly = {},
+            nInRangeEnemy = {},
+            distanceToLane = {[Lane.Top] = 0, [Lane.Mid] = 0, [Lane.Bot] = 0}
+        }
+    end
+    return bot._defend
+end
 function updateDefendGameStateCache()
     local now = DotaTime()
     if defendGameStateCache and now - defendGameStateCache.lastUpdate < DEFEND_CACHE_TTL then
@@ -318,19 +330,19 @@ function _recentHeroCountNear(loc, r, window)
     local cnt = 0
     for ____, id in ipairs(GetTeamPlayers(gameState.enemyTeam)) do
         do
-            local __continue17
+            local __continue19
             repeat
                 if not IsHeroAlive(id) then
-                    __continue17 = true
+                    __continue19 = true
                     break
                 end
                 local info = GetHeroLastSeenInfo(id)
                 if info and info[1] and info[1].time_since_seen <= window and GetLocationToLocationDistance(info[1].location, loc) <= r then
                     cnt = cnt + 1
                 end
-                __continue17 = true
+                __continue19 = true
             until true
-            if not __continue17 then
+            if not __continue19 then
                 break
             end
         end
@@ -879,8 +891,9 @@ function ____exports.GetDefendDesireHelper(bot, lane)
     local locationState = updateDefendLocationStateCache()
     local team = gameState.team
     local ancient = gameState.ourAncient
-    defendLoc = locationState.laneFronts[lane]
-    local distanceToDefendLoc = GetUnitToLocationDistance(bot, defendLoc)
+    local ds = getDefendState(bot)
+    ds.defendLoc = locationState.laneFronts[lane]
+    local distanceToDefendLoc = GetUnitToLocationDistance(bot, ds.defendLoc)
     local botLevel = bot:GetLevel()
     if bot:GetAssignedLane() ~= lane and distanceToDefendLoc > 3000 and (jmz.GetPosition(bot) == 1 and botLevel < 6 or jmz.GetPosition(bot) == 2 and botLevel < 6 or jmz.GetPosition(bot) == 3 and botLevel < 5 or jmz.GetPosition(bot) == 4 and botLevel < 4 or jmz.GetPosition(bot) == 5 and botLevel < 4) then
         return BotModeDesire.None
@@ -907,7 +920,7 @@ function ____exports.GetDefendDesireHelper(bot, lane)
             forceLoc = ancient and jmz.AdjustLocationWithOffsetTowardsFountain(
                 ancient:GetLocation(),
                 300
-            ) or defendLoc
+            ) or ds.defendLoc
         }
         bot.laneToDefend = lane
     end
@@ -964,9 +977,9 @@ function ____exports.GetDefendDesireHelper(bot, lane)
         end
     end
     if panic.active and panic.forceLoc then
-        defendLoc = panic.forceLoc
+        ds.defendLoc = panic.forceLoc
     elseif isBaseThreatActive and ancient then
-        defendLoc = jmz.AdjustLocationWithOffsetTowardsFountain(
+        ds.defendLoc = jmz.AdjustLocationWithOffsetTowardsFountain(
             ancient:GetLocation(),
             300
         )
@@ -976,26 +989,25 @@ function ____exports.GetDefendDesireHelper(bot, lane)
             return BotModeDesire.VeryLow
         end
     else
-        if jmz.Utils.GetLocationToLocationDistance(gameState.teamFountainTpPoint, defendLoc) < 3000 then
+        if jmz.Utils.GetLocationToLocationDistance(gameState.teamFountainTpPoint, ds.defendLoc) < 3000 then
             local enemyLaneFront = locationState.enemyLaneFronts[lane]
             local eNear = jmz.GetLastSeenEnemiesNearLoc(enemyLaneFront, 1600)
             local aNear = jmz.GetAlliesNearLoc(enemyLaneFront, 1600)
             if GetUnitToLocationDistance(bot, enemyLaneFront) > bot:GetAttackRange() and #eNear <= #aNear + 1 then
-                defendLoc = enemyLaneFront
-                bot:Action_AttackMove(defendLoc)
+                ds.defendLoc = enemyLaneFront
             end
         end
     end
-    distanceToLane[lane] = GetUnitToLocationDistance(bot, defendLoc)
-    nInRangeAlly = jmz.GetNearbyHeroes(bot, 1600, false, BotMode.None)
-    nInRangeEnemy = jmz.GetLastSeenEnemiesNearLoc(
+    ds.distanceToLane[lane] = GetUnitToLocationDistance(bot, ds.defendLoc)
+    ds.nInRangeAlly = jmz.GetNearbyHeroes(bot, 1600, false, BotMode.None)
+    ds.nInRangeEnemy = jmz.GetLastSeenEnemiesNearLoc(
         bot:GetLocation(),
         1600
     )
-    weAreStronger = jmz.WeAreStronger(bot, 2500)
+    ds.weAreStronger = jmz.WeAreStronger(bot, 2500)
     local pos = jmz.GetPosition(bot)
     local bMyLane = bot:GetAssignedLane() == lane
-    if #nInRangeEnemy > 0 or not bMyLane and pos == 1 and gameState.isLaningPhase or jmz.IsDoingRoshan(bot) and #jmz.GetAlliesNearLoc(
+    if #ds.nInRangeEnemy > 0 or not bMyLane and pos == 1 and gameState.isLaningPhase or jmz.IsDoingRoshan(bot) and #jmz.GetAlliesNearLoc(
         jmz.GetCurrentRoshanLocation(),
         2800
     ) >= 3 or jmz.IsDoingTormentor(bot) and (#jmz.GetAlliesNearLoc(
@@ -1022,7 +1034,7 @@ function ____exports.GetDefendDesireHelper(bot, lane)
     end
     local shouldDef = ____exports.ShouldDefend(bot, furthestBuilding, 1600)
     if not shouldDef then
-        local dist = distanceToLane[lane]
+        local dist = ds.distanceToLane[lane]
         local tp = jmz.Utils.GetItemFromFullInventory(bot, "item_tpscroll")
         local nearEnemiesAtBuilding = jmz.GetLastSeenEnemiesNearLoc(
             furthestBuilding:GetLocation(),
@@ -1064,8 +1076,8 @@ function ____exports.GetDefendDesireHelper(bot, lane)
         BotActionDesire.Low
     )
     do
-        local dist = distanceToLane[lane]
-        if dist and dist < 1600 and #nInRangeEnemy > #nInRangeAlly and not weAreStronger then
+        local dist = ds.distanceToLane[lane]
+        if dist and dist < 1600 and #ds.nInRangeEnemy > #ds.nInRangeAlly and not ds.weAreStronger then
             nDefendDesire = RemapValClamped(
                 nDefendDesire,
                 0,
@@ -1081,7 +1093,7 @@ function ____exports.GetDefendDesireHelper(bot, lane)
     end
     do
         local tp = jmz.Utils.GetItemFromFullInventory(bot, "item_tpscroll")
-        local dist = distanceToLane[lane]
+        local dist = ds.distanceToLane[lane]
         if not jmz.CanCastAbility(tp) and dist and dist > 4000 then
             local nearEnemies = jmz.GetLastSeenEnemiesNearLoc(
                 furthestBuilding:GetLocation(),
@@ -1122,7 +1134,7 @@ function ____exports.GetDefendDesireHelper(bot, lane)
     )
     if recentlyHit then
         nDefendDesire = nDefendDesire * 0.4
-        if #nInRangeEnemy >= #nInRangeAlly and not weAreStronger then
+        if #ds.nInRangeEnemy >= #ds.nInRangeAlly and not ds.weAreStronger then
             nDefendDesire = math.min(nDefendDesire, BotActionDesire.Low)
         end
     end
@@ -1158,21 +1170,11 @@ BASE_THREAT_HOLD = 4
 CACHE_ENEMY_AROUND_LOC_HZ = 0.35
 CACHE_LASTSEEN_WINDOW = 5
 nTeam = GetTeam()
-defendLoc = GetLaneFrontLocation(
-    GetTeam(),
-    Lane.Mid,
-    0
-)
-weAreStronger = false
-nInRangeAlly = {}
-nInRangeEnemy = {}
 _threatLaneSticky = {lane = Lane.Mid, ["until"] = -1}
-distanceToLane = {[Lane.Top] = 0, [Lane.Mid] = 0, [Lane.Bot] = 0}
 baseThreatUntil = -1
 fTraveBootsDefendTime = 0
 _cacheEnemyAroundLoc = {}
 DEFEND_CACHE_TTL = 0.5
-local DEFEND_THINK_INTERVAL = 1 / 30
 defendGameStateCache = nil
 defendLocationStateCache = nil
 defendUnitStateCache = nil
@@ -1187,40 +1189,8 @@ function ____exports.GetDefendDesire(bot, lane)
     bot.defendDesire = res
     return res
 end
-local lastDefendThinkTime = 0
-local lastDefendAction = nil
 function ____exports.DefendThink(bot, lane)
     local now = DotaTime()
-    if now - lastDefendThinkTime < DEFEND_THINK_INTERVAL then
-        if lastDefendAction and now - lastDefendAction.time < 2 then
-            repeat
-                local ____switch172 = lastDefendAction.type
-                local ____cond172 = ____switch172 == "attack"
-                if ____cond172 then
-                    if lastDefendAction.target and type(lastDefendAction.target) == "table" and lastDefendAction.target.GetLocation ~= nil then
-                        bot:Action_AttackUnit(lastDefendAction.target, true)
-                    end
-                    break
-                end
-                ____cond172 = ____cond172 or ____switch172 == "move"
-                if ____cond172 then
-                    if lastDefendAction.target and type(lastDefendAction.target) == "table" and lastDefendAction.target.x ~= nil then
-                        bot:Action_MoveToLocation(lastDefendAction.target)
-                    end
-                    break
-                end
-                ____cond172 = ____cond172 or ____switch172 == "attackMove"
-                if ____cond172 then
-                    if lastDefendAction.target and type(lastDefendAction.target) == "table" and lastDefendAction.target.x ~= nil then
-                        bot:Action_AttackMove(lastDefendAction.target)
-                    end
-                    break
-                end
-            until true
-        end
-        return
-    end
-    lastDefendThinkTime = now
     if jmz.CanNotUseAction(bot) then
         return
     end
@@ -1244,7 +1214,8 @@ function ____exports.DefendThink(bot, lane)
     else
         pathEnemies = bot[pathCacheKey]
     end
-    if bot:WasRecentlyDamagedByAnyHero(5) and #pathEnemies > #nInRangeEnemy then
+    local ds = getDefendState(bot)
+    if bot:WasRecentlyDamagedByAnyHero(5) and #pathEnemies > #ds.nInRangeEnemy then
         local safe = jmz.AdjustLocationWithOffsetTowardsFountain(
             bot:GetLocation(),
             700
@@ -1267,7 +1238,6 @@ function ____exports.DefendThink(bot, lane)
                 anchor,
                 jmz.RandomForwardVector(250)
             )
-            lastDefendAction = {type = "move", target = moveLoc, time = now}
             bot:Action_MoveToLocation(moveLoc)
             return
         end
@@ -1291,7 +1261,6 @@ function ____exports.DefendThink(bot, lane)
             enemiesNear = jmz.Utils[enemiesCacheKey]
         end
         if jmz.IsValidHero(enemiesNear[1]) and jmz.IsInRange(bot, enemiesNear[1], nSearchRange) then
-            lastDefendAction = {type = "attack", target = enemiesNear[1], time = now}
             bot:Action_AttackUnit(enemiesNear[1], true)
             return
         end
@@ -1299,17 +1268,16 @@ function ____exports.DefendThink(bot, lane)
             anchor,
             jmz.RandomForwardVector(300)
         )
-        lastDefendAction = {type = "attackMove", target = attackMoveLoc, time = now}
         bot:Action_AttackMove(attackMoveLoc)
         return
     end
     local attackRange = bot:GetAttackRange()
     local nSearchRange = attackRange < 900 and 900 or math.min(attackRange, SEARCH_RANGE_DEFAULT)
-    if not defendLoc then
-        defendLoc = GetLaneFrontLocation(nTeam, lane, 0)
+    if not ds.defendLoc then
+        ds.defendLoc = GetLaneFrontLocation(nTeam, lane, 0)
     end
     local bld, _, buildingTier = unpack(____exports.GetFurthestBuildingOnLane(lane))
-    local hub = defendLoc
+    local hub = ds.defendLoc
     if IsValidBuildingTarget(bld) then
         hub = bld:GetLocation()
     end
@@ -1326,7 +1294,6 @@ function ____exports.DefendThink(bot, lane)
                 edgeInside,
                 jmz.RandomForwardVector(120)
             )
-            lastDefendAction = {type = "attackMove", target = attackMoveLoc, time = now}
             bot:Action_AttackMove(attackMoveLoc)
         else
             local deeper = jmz.AdjustLocationWithOffsetTowardsFountain(edgeInside, 200)
@@ -1334,20 +1301,17 @@ function ____exports.DefendThink(bot, lane)
                 deeper,
                 jmz.RandomForwardVector(120)
             )
-            lastDefendAction = {type = "attackMove", target = attackMoveLoc, time = now}
             bot:Action_AttackMove(attackMoveLoc)
         end
         return
     end
     local enemiesAtHub = jmz.GetEnemiesNearLoc(hub, SEARCH_RANGE_DEFAULT)
     if jmz.IsValidHero(enemiesAtHub[1]) and jmz.IsInRange(bot, enemiesAtHub[1], nSearchRange) then
-        lastDefendAction = {type = "attack", target = enemiesAtHub[1], time = now}
         bot:Action_AttackUnit(enemiesAtHub[1], true)
         return
     end
     local nEnemyHeroes = bot:GetNearbyHeroes(SEARCH_RANGE_DEFAULT, true, BotMode.None)
     if jmz.IsValidHero(nEnemyHeroes[1]) and jmz.IsInRange(bot, nEnemyHeroes[1], nSearchRange) then
-        lastDefendAction = {type = "attack", target = nEnemyHeroes[1], time = now}
         bot:Action_AttackUnit(nEnemyHeroes[1], true)
         return
     end
@@ -1355,22 +1319,16 @@ function ____exports.DefendThink(bot, lane)
     if creeps and #creeps > 0 and (not enemiesAtHub or #enemiesAtHub == 0) then
         local best = nil
         local bestDmg = -1
-        do
-            local i = 1
-            while i <= #creeps do
-                local c = creeps[i + 1]
-                if jmz.IsValid(c) and jmz.CanBeAttacked(c) then
-                    local dmg = c:GetAttackDamage()
-                    if dmg > bestDmg then
-                        best = c
-                        bestDmg = dmg
-                    end
+        for ____, c in ipairs(creeps) do
+            if jmz.IsValid(c) and jmz.CanBeAttacked(c) then
+                local dmg = c:GetAttackDamage()
+                if dmg > bestDmg then
+                    best = c
+                    bestDmg = dmg
                 end
-                i = i + 1
             end
         end
         if best then
-            lastDefendAction = {type = "attack", target = best, time = now}
             bot:Action_AttackUnit(best, true)
             return
         end
@@ -1380,31 +1338,27 @@ function ____exports.DefendThink(bot, lane)
             hub,
             jmz.RandomForwardVector(300)
         )
-        lastDefendAction = {type = "attackMove", target = attackMoveLoc, time = now}
         bot:Action_AttackMove(attackMoveLoc)
         return
     end
-    local dist = distanceToLane[lane] or GetUnitToLocationDistance(bot, hub)
-    if (weAreStronger or #nInRangeAlly >= #nInRangeEnemy) and dist < SEARCH_RANGE_DEFAULT then
+    local dist = ds.distanceToLane[lane] or GetUnitToLocationDistance(bot, hub)
+    if (ds.weAreStronger or #ds.nInRangeAlly >= #ds.nInRangeEnemy) and dist < SEARCH_RANGE_DEFAULT then
         local attackMoveLoc = add(
             hub,
             jmz.RandomForwardVector(300)
         )
-        lastDefendAction = {type = "attackMove", target = attackMoveLoc, time = now}
         bot:Action_AttackMove(attackMoveLoc)
     elseif dist > SEARCH_RANGE_DEFAULT * 1.7 then
         local moveLoc = add(
             hub,
             jmz.RandomForwardVector(300)
         )
-        lastDefendAction = {type = "move", target = moveLoc, time = now}
         bot:Action_MoveToLocation(moveLoc)
     else
         local moveLoc = add(
             hub,
             jmz.RandomForwardVector(1000)
         )
-        lastDefendAction = {type = "move", target = moveLoc, time = now}
         bot:Action_MoveToLocation(moveLoc)
     end
 end

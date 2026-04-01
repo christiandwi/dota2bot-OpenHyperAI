@@ -21,6 +21,56 @@ local nRuneList = {
 	RUNE_POWERUP_2,
 }
 
+local nHumanClaimedRuneTime = {}  -- rune -> GameTime when a human claimed it
+
+-- Check if a human ally is near a rune or normal-pinged it (defer for 5s)
+local function IsHumanClaimingRune(nRune)
+	local vRuneLoc = GetRuneSpawnLocation(nRune)
+	if nHumanClaimedRuneTime[nRune] and GameTime() - nHumanClaimedRuneTime[nRune] < 5 then
+		return true
+	end
+	for i = 1, #GetTeamPlayers(GetTeam()) do
+		local member = GetTeamMember(i)
+		if member ~= nil and member:IsAlive() and not member:IsBot() then
+			if GetUnitToLocationDistance(member, vRuneLoc) < 2000 then
+				nHumanClaimedRuneTime[nRune] = GameTime()
+				return true
+			end
+			local ping = member:GetMostRecentPing()
+			if ping ~= nil and ping.normal_ping
+			and J.GetDistance(ping.location, vRuneLoc) < 800
+			and GameTime() - ping.time < 5 then
+				nHumanClaimedRuneTime[nRune] = GameTime()
+				return true
+			end
+		end
+	end
+	return false
+end
+
+-- Proximity override: if very close to an available rune, grab it
+-- unless there's a strong reason not to (low HP retreat, finishing a kill, human claiming)
+local function ConsiderProximityRune()
+	for _, rune in pairs(nRuneList) do
+		local rLoc = GetRuneSpawnLocation(rune)
+		local dist = GetUnitToLocationDistance(bot, rLoc)
+		if dist < 400 and GetRuneStatus(rune) == RUNE_STATUS_AVAILABLE then
+			if IsHumanClaimingRune(rune) then return 0, -1 end
+			if J.IsRetreating(bot) and J.GetHP(bot) < 0.3 and bot:WasRecentlyDamagedByAnyHero(2.0) then
+				return 0, -1
+			end
+			local nCloseEnemy = bot:GetNearbyHeroes(600, true, BOT_MODE_NONE)
+			if J.IsGoingOnSomeone(bot) and #nCloseEnemy >= 1 and J.GetHP(nCloseEnemy[1]) < 0.3 then
+				return 0, -1
+			end
+			ClosestRune = rune
+			ClosestDistance = dist
+			return RemapValClamped(dist, 0, 400, 0.95, 0.85), rune
+		end
+	end
+	return 0, -1
+end
+
 local radiantWRLocation = Vector(-7948.152344, 768.207825, 256.000000)
 local direWRLocation = Vector(8029.234375, -1125.811768, 256.000000)
 local wisdomRuneSpots = {
@@ -53,7 +103,11 @@ function GetDesireHelper()
     botActiveMode = bot:GetActiveMode()
 	bBottle = J.HasItem(bot, 'item_bottle')
 
-	-- 如果在打高地 就别撤退去干别的
+	-- Proximity override: if very close to available rune, just grab it
+	local proxDesire, proxRune = ConsiderProximityRune()
+	if proxDesire > 0 then return proxDesire end
+
+	-- Don't leave high ground push or ancient defense for runes
 	if J.Utils.IsTeamPushingSecondTierOrHighGround(bot) then
 		return BOT_MODE_DESIRE_NONE
 	end
@@ -435,6 +489,7 @@ function X.GetBotClosestRune()
 
         if X.IsTheClosestOne(rLoc, rune)
         and not X.IsPingedByHumanPlayer(rLoc, 1200)
+		and not IsHumanClaimingRune(rune)
 		and not X.IsMissing(rune)
 		and not X.IsTherePosition(1, rune, 1600)
 		and not X.IsTherePosition(2, rune, 1600)
@@ -573,9 +628,11 @@ function X.IsEnemyPickRune(nRune)
 end
 
 function X.GetScaledDesire(nBase, nCurrDist, nMaxDist)
-	local maxDesire = 0.85
+	local maxDesire = 0.92
 	if nCurrDist > 2000 and (J.IsLateGame() or J.GetDistanceFromEnemyFountain( bot ) < 5500) then
 		maxDesire = 0.55
+	elseif nCurrDist > 1200 then
+		maxDesire = 0.85
 	end
 	local hp = J.GetHP(bot)
 	local resDesire = Clamp(nBase * RemapValClamped(nCurrDist, 0, nMaxDist, 1, 0.5), 0, maxDesire)

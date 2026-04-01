@@ -1661,7 +1661,25 @@ ConsiderHeroSpecificRoaming['npc_dota_hero_meepo'] = function ()
 end
 
 ConsiderHeroSpecificRoaming['npc_dota_hero_monkey_king'] = function ()
-	return CheckHighPriorityChannelAbility("monkey_king_primal_spring")
+	-- Protect Primal Spring channel
+	cAbility = bot:GetAbilityByName("monkey_king_primal_spring")
+	if cAbility ~= nil and cAbility:IsTrained() then
+		if cAbility:IsInAbilityPhase() or bot:IsChanneling() then
+			return BOT_MODE_DESIRE_ABSOLUTE
+		end
+	end
+
+	-- After landing from Tree Dance, hold position briefly to avoid
+	-- erratic movement (tree_dance_status tracks the jump timing)
+	if not bot:IsChanneling() and bot.tree_dance_status then
+		local eta = bot.tree_dance_status.eta or 0
+		local elapsed = DotaTime() - (bot.tree_dance_status.cast_time or 0)
+		if elapsed > (3.0 + eta) and elapsed < (4.0 + eta) then
+			return BOT_MODE_DESIRE_ABSOLUTE
+		end
+	end
+
+	return BOT_MODE_DESIRE_NONE
 end
 
 ConsiderHeroSpecificRoaming['npc_dota_hero_nyx_assassin'] = function ()

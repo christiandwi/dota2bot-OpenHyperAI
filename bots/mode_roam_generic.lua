@@ -138,34 +138,7 @@ function GetDesireHelper()
 	return BOT_MODE_DESIRE_NONE
 end
 
--- Frame rate limiting for performance
-local lastThinkTime = 0
-local THINK_INTERVAL = 1/30 -- Limit to 30 FPS max
-local lastAction = nil -- {type, target, time}
-
--- Helper function to record actions
-local function recordAction(actionType, target)
-    lastAction = {type = actionType, target = target, time = DotaTime()}
-end
-
 function Think()
-    -- Frame rate limiting
-    local now = DotaTime()
-    if now - lastThinkTime < THINK_INTERVAL then 
-        -- Continue last action to prevent idle bots
-        if lastAction and now - lastAction.time < 2.0 then
-            if lastAction.type == "attack" and lastAction.target then
-                bot:Action_AttackUnit(lastAction.target, true)
-            elseif lastAction.type == "move" and lastAction.target then
-                bot:Action_MoveToLocation(lastAction.target)
-            elseif lastAction.type == "attackMove" and lastAction.target then
-                bot:Action_AttackMove(lastAction.target)
-            end
-        end
-        return 
-    end
-    lastThinkTime = now
-    
     if J.CanNotUseAction(bot) then return end
 	if J.Utils.IsBotThinkingMeaningfulAction(bot, Customize.ThinkLess, "roam") then return end
 
@@ -302,7 +275,6 @@ function ThinkIndividualRoaming()
 			if target ~= nil
 			then
 				local moveLoc = J.GetCorrectLoc(target, 0.2)
-				recordAction("move", moveLoc)
 				bot:Action_MoveToLocation(moveLoc)
 				return
 			end
@@ -929,11 +901,9 @@ function GeneralReactToStackedDebuff(enemyHeroName)
 	if enemy ~= nil then -- nil check is enough here
 		if J.GetHP(bot) > 0.6 and not J.Utils.NumActionTypeInQueue(BOT_ACTION_TYPE_ATTACK) <= 2 then
 			bot:ActionImmediate_Ping(enemy:GetLocation().x, enemy:GetLocation().y, true)
-			recordAction("attack", enemy)
 			bot:ActionQueue_AttackUnit(enemy, false)
 		else
 			local fountainLoc = J.GetTeamFountain()
-			recordAction("move", fountainLoc)
 			bot:Action_MoveToLocation(fountainLoc)
 		end
 	end

@@ -193,11 +193,11 @@ function X.SkillsComplement()
         if J.CanNotUseAbility(bot) then return end
     end
 
-    InfestDesire, InfestTarget = X.ConsiderInfest()
-    if InfestDesire > 0 then
-        bot:Action_UseAbilityOnEntity(Infest, InfestTarget)
-        return
-    end
+    -- InfestDesire, InfestTarget = X.ConsiderInfest()
+    -- if InfestDesire > 0 then
+    --     bot:Action_UseAbilityOnEntity(Infest, InfestTarget)
+    --     return
+    -- end
 
     RageDesire = X.ConsiderRage()
     if RageDesire > 0 then

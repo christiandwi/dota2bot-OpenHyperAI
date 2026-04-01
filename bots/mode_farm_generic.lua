@@ -21,8 +21,6 @@ local hLaneCreepList = {};
 local farmState = 0;
 local FARM_STATE_NONE = 0;
 local FARM_STATE_FARM = 1;
-local FARM_STATE_STACK = 2;
-local bStackAggroChecked = false;
 local teamPlayers = nil;
 local nLaneList = {LANE_TOP, LANE_MID, LANE_BOT};
 local assembleTime = 0;
@@ -250,7 +248,7 @@ function GetDesireHelper()
                     or (botActiveMode == BOT_MODE_ITEM)
                     then
 						if preferedCamp == nil then preferedCamp = J.Site.GetClosestNeutralSpwan(bot, availableCamp) end
-                        return RemapValClamped(J.GetHP(bot), 0.2, 0.7, BOT_MODE_DESIRE_MODERATE, BOT_MODE_DESIRE_ABSOLUTE)
+                        return RemapValClamped(J.GetHP(bot), 0.2, 0.7, BOT_MODE_DESIRE_MODERATE, BOT_MODE_DESIRE_VERYHIGH)
 					end
                 end
             end
@@ -271,7 +269,7 @@ function GetDesireHelper()
                     or (botActiveMode == BOT_MODE_ITEM)
                     then
 						if preferedCamp == nil then preferedCamp = J.Site.GetClosestNeutralSpwan(bot, availableCamp) end
-                        return RemapValClamped(J.GetHP(bot), 0.2, 0.7, BOT_MODE_DESIRE_MODERATE, BOT_MODE_DESIRE_ABSOLUTE)
+                        return RemapValClamped(J.GetHP(bot), 0.2, 0.7, BOT_MODE_DESIRE_MODERATE, BOT_MODE_DESIRE_VERYHIGH)
                     end
                 end
             end
@@ -329,7 +327,7 @@ function GetDesireHelper()
     local hItem = J.IsItemAvailable('item_hand_of_midas')
     if J.IsInAllyArea(bot) and J.CanCastAbility(hItem) then
         if preferedCamp == nil then preferedCamp = J.Site.GetClosestNeutralSpwan(bot, availableCamp) end;
-        return RemapValClamped(J.GetHP(bot), 0.2, 0.7, BOT_MODE_DESIRE_MODERATE, BOT_MODE_DESIRE_ABSOLUTE)
+        return RemapValClamped(J.GetHP(bot), 0.2, 0.7, BOT_MODE_DESIRE_MODERATE, BOT_MODE_DESIRE_VERYHIGH)
     end
 
 	if J.IsDefending(bot) and botActiveModeDesire >= 0.75 then
@@ -362,47 +360,53 @@ function GetDesireHelper()
 		end
 	end
 
-	if GetGameMode() ~= GAMEMODE_MO 
+	-- Gradual farm desire cap: ramps from 0.3 during laning to 0.6 by 20min (turbo: 14min)
+	-- Keeps jungle farming as a secondary priority — never dominant over teamfight/push/defend
+	local nFarmRampStart = J.IsModeTurbo() and 8 * 60 or 10 * 60
+	local nFarmRampEnd   = J.IsModeTurbo() and 14 * 60 or 20 * 60
+	local nFarmCap = RemapValClamped(DotaTime(), nFarmRampStart, nFarmRampEnd, 0.3, 0.6)
+
+	if GetGameMode() ~= GAMEMODE_MO
 	and J.Site.IsTimeToFarm(bot)
 	and not J.IsDefending(bot)
 	and (bot:GetUnitName() ~= 'npc_dota_hero_lone_druid_bear' or (bot:HasScepter() and not J.IsValid(LoneDruid.hero)))
 	and (DotaTime() > 8 * 60 or bot:GetLevel() >= 8 or ( bot:GetAttackRange() < 220 and bot:GetLevel() >= 6 ))
-	and networthAdvantage < 10000
+	and networthAdvantage < 6000
 	and not J.IsLateGame()
 	then
-		if J.GetDistanceFromEnemyFountain(bot) > 4000 
+		if J.GetDistanceFromEnemyFountain(bot) > 4000
 		then
 			hLaneCreepList = bot:GetNearbyLaneCreeps(1600, true);
-			if #hLaneCreepList == 0	
+			if #hLaneCreepList == 0
 			   and J.IsInAllyArea( bot )
 			   and X.IsNearLaneFront( bot )
 			then
 				hLaneCreepList = bot:GetNearbyLaneCreeps(1600, false);
 			end
-		end;		
-		
-		if #hLaneCreepList > 0 
+		end;
+
+		if #hLaneCreepList > 0
 		then
 			bot.farmLocation = J.GetCenterOfUnits(hLaneCreepList)
-			return RemapValClamped(J.GetHP(bot), 0.2, 0.7, 0.4, BOT_MODE_DESIRE_HIGH)
+			return Min(RemapValClamped(J.GetHP(bot), 0.2, 0.7, 0.4, BOT_MODE_DESIRE_HIGH), nFarmCap)
 		else
 			if preferedCamp == nil then preferedCamp = J.Site.GetClosestNeutralSpwan(bot, availableCamp);end
-			
+
 			if preferedCamp ~= nil then
-				if not J.Site.IsModeSuitableToFarm(bot) 
-				then 
+				if not J.Site.IsModeSuitableToFarm(bot)
+				then
 					return BOT_MODE_DESIRE_NONE;
-				elseif bot:GetHealth() <= 200 
-					then 
+				elseif bot:GetHealth() <= 200
+					then
 						teamTime = DotaTime();
 						return BOT_MODE_DESIRE_VERYLOW;
 				elseif farmState == FARM_STATE_FARM
-					then 
-						return BOT_MODE_DESIRE_ABSOLUTE *0.89;
+					then
+						return nFarmCap;
 				else
 					local farmDistance = GetUnitToLocationDistance(bot,preferedCamp.cattr.location);
 					bot.farmLocation = preferedCamp.cattr.location
-					return RemapValClamped(J.GetHP(bot), 0.2, 0.7, 0.4, BOT_MODE_DESIRE_VERYHIGH);
+					return Min(RemapValClamped(J.GetHP(bot), 0.2, 0.7, 0.4, BOT_MODE_DESIRE_VERYHIGH), nFarmCap);
 				end
 			end
 		end
@@ -411,7 +415,7 @@ function GetDesireHelper()
 	if not J.IsInLaningPhase() and (bCore or J.IsLateGame() or bot:GetLevel() >= 18) then
 		hLaneCreepList = bot:GetNearbyLaneCreeps(1600, true)
 		if preferedCamp == nil then preferedCamp = J.Site.GetClosestNeutralSpwan(bot, availableCamp) end
-		return BOT_MODE_DESIRE_LOW
+		return Min(BOT_MODE_DESIRE_LOW, nFarmCap)
 	end
 
 	return BOT_MODE_DESIRE_NONE
@@ -425,7 +429,6 @@ end
 function OnEnd()
 	preferedCamp = nil;
 	farmState = FARM_STATE_NONE;
-	bStackAggroChecked = false;
 	hLaneCreepList  = {};
 	runMode = false;
 	runTime = 0;
@@ -435,7 +438,7 @@ end
 function Think()
 	if J.CanNotUseAction(bot) then return end
 	if J.Utils.IsBotThinkingMeaningfulAction(bot, Customize.ThinkLess, "farm") then return end
-	sec = math.floor(DotaTime()) % 60 -- refresh for stacking timing accuracy
+	sec = math.floor(DotaTime()) % 60
 	if runMode
 	then
 		if not bot:IsInvisible() and bot:GetLevel() >= 15
@@ -565,45 +568,6 @@ function Think()
 		local cDist = GetUnitToLocationDistance(bot, targetFarmLoc);
 		local nNeutrals = bot:GetNearbyCreeps(900, true);
 
-		-- Camp stacking logic: at seconds 54-56, pull creeps away to stack
-		local nStackTime = J.Site.GetCampStackTime(preferedCamp)
-		if sec >= nStackTime and sec <= 58
-		   and cDist < 800
-		   and #nNeutrals >= 1
-		   and farmState ~= FARM_STATE_STACK
-		   and not J.IsCore(bot) -- primarily supports stack
-		then
-			farmState = FARM_STATE_STACK
-			bStackAggroChecked = false
-		end
-
-		if farmState == FARM_STATE_STACK then
-			if sec < nStackTime or sec > 58 then
-				-- Stack window over, return to normal farming
-				farmState = FARM_STATE_NONE
-				bStackAggroChecked = false
-			else
-				-- Check if creeps need aggro first
-				if not bStackAggroChecked then
-					bStackAggroChecked = true
-					local bHasAggro = X.IsThereCreepAggro(nNeutrals)
-					if not bHasAggro and J.IsValid(nNeutrals[1]) then
-						bot:Action_AttackUnit(nNeutrals[1], true)
-						return
-					end
-				end
-
-				-- Move away from camp to pull creeps out for stacking
-				local vStackDir = J.VectorAway(targetFarmLoc, (J.GetTeamFountain() + J.GetEnemyFountain()) / 2, 1200)
-				if GetUnitToLocationDistance(bot, vStackDir) + 200 < J.Site.GetDistance(targetFarmLoc, vStackDir) then
-					bot:Action_MoveToLocation(vStackDir)
-				else
-					bot:Action_MoveToLocation(J.VectorAway(bot:GetLocation(), targetFarmLoc, 1200))
-				end
-				return
-			end
-		end
-
 		if #nNeutrals >= 3 and cDist <= 600 and cDist > 240
 		   and ( bot:GetLevel() >= 10 or not nNeutrals[1]:IsAncientCreep())
 		then farmState = FARM_STATE_FARM end;
@@ -699,15 +663,6 @@ function Think()
 	
 	bot:Action_MoveToLocation( ( RB + DB )/2 );
 	return;
-end
-
-function X.IsThereCreepAggro(hCreepList)
-	for _, creep in pairs(hCreepList) do
-		if J.IsValid(creep) and creep:GetAttackTarget() == bot then
-			return true
-		end
-	end
-	return false
 end
 
 function X.IsNearLaneFront( bot )

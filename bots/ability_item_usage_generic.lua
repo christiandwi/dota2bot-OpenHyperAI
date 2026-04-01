@@ -14,6 +14,7 @@ local Localization = require( GetScriptDirectory()..'/FunLib/localization' )
 local Customize = require(GetScriptDirectory()..'/Customize/general')
 Customize.ThinkLess = Customize.Enable and Customize.ThinkLess or 1
 if GAMEMODE_TURBO == nil then GAMEMODE_TURBO = 23 end
+if GAMEMODE_ARDM == nil then GAMEMODE_ARDM = 20 end
 
 if BotBuild == nil then return end
 
@@ -24,10 +25,72 @@ local sAbilityLevelUpList = BotBuild['sSkillList']
 local RadiantFountain = Vector(-6619, -6336, 384)
 local DireFountain = Vector(6928, 6372, 392)
 
+local bNeedARDMReload = false
+
+-- ARDM: Refresh the bot handle and detect stale hero instances.
+-- Returns true if this script instance should do NOTHING (stale hero from a past life).
+local function RefreshBotHandle()
+	local isStale, freshBot, freshName = J.IsStaleARDMHero(bot, botName)
+	if isStale then
+		print("[ARDM] Stale ability script: this="..botName..", current="..freshName)
+		return true
+	end
+
+	-- Update handle/name if changed (hero swapped in place)
+	if freshName ~= botName then
+		print("[ARDM] Hero swap detected: "..botName.." -> "..freshName)
+		bot = freshBot
+		botName = freshName
+		bNeedARDMReload = true
+	elseif freshBot ~= bot then
+		bot = freshBot
+	end
+
+	-- Reload BotLib when hero changed and is alive (abilities initialized)
+	if bNeedARDMReload and bot:IsAlive() then
+		bNeedARDMReload = false
+		local heroFile = string.gsub(botName, "npc_dota_", "")
+		print("[ARDM] Loading BotLib/"..heroFile..".lua for "..botName)
+		local ok, newBuild = pcall(dofile, GetScriptDirectory().."/BotLib/"..heroFile)
+		if not ok then
+			print("[ARDM] dofile FAILED for "..heroFile..": "..tostring(newBuild))
+		end
+		if ok and newBuild ~= nil and newBuild['sSkillList'] ~= nil and #newBuild['sSkillList'] > 0 then
+			BotBuild = newBuild
+			bDeafaultAbilityHero = BotBuild['bDeafaultAbility']
+			bDeafaultItemHero = BotBuild['bDeafaultItem']
+			sAbilityLevelUpList = BotBuild['sSkillList']
+			print("[ARDM] Loaded BotLib for "..botName.." with "..#sAbilityLevelUpList.." skill entries, first: "..tostring(sAbilityLevelUpList[1]))
+		else
+			local abilityList = J.Skill.GetAbilityList(bot)
+			local talentList = J.Skill.GetTalentList(bot)
+			print("[ARDM] BotLib load failed or empty for "..botName..", abilities: "..#abilityList..", talents: "..#talentList)
+			if #abilityList > 0 then
+				BotBuild = nil
+				bDeafaultAbilityHero = false
+				bDeafaultItemHero = false
+				sAbilityLevelUpList = J.Utils.CombineTablesUnique(talentList, abilityList)
+				print("[ARDM] Using generic build for "..botName.." with "..#sAbilityLevelUpList.." entries")
+			else
+				print("[ARDM] Abilities not ready for "..botName..", retrying next frame")
+				bNeedARDMReload = true
+			end
+		end
+	elseif bNeedARDMReload and not bot:IsAlive() then
+		print("[ARDM] Waiting for "..botName.." to respawn")
+	end
+
+	return false
+end
+
 local function AbilityLevelUpComplement()
 	if GetGameState() ~= GAME_STATE_PRE_GAME
 		and GetGameState() ~= GAME_STATE_GAME_IN_PROGRESS
 	then
+		return
+	end
+
+	if J.CanNotUseAbility(bot) then
 		return
 	end
 
@@ -62,19 +125,47 @@ local function AbilityLevelUpComplement()
 		bot.stuckLoc = nil
 	end
 
-	if bot.needRefreshAbilitiesFor737 ~= nil then
+	if bot.needRefreshAbilitiesFor737 ~= nil and BotBuild ~= nil then
 		sAbilityLevelUpList = BotBuild['sSkillList']
 		if not bot.needRefreshAbilitiesFor737 then bot.needRefreshAbilitiesFor737 = nil end
 	end
 
 	local botLevel = bot:GetLevel()
 
+	if GetGameMode() == GAMEMODE_ARDM and bot:GetAbilityPoints() > 0 then
+		print("[ARDM] "..botName.." Lv"..botLevel.." has "..bot:GetAbilityPoints().." ability points, skill list has "..#sAbilityLevelUpList.." entries"
+			..(#sAbilityLevelUpList > 0 and (", next: "..tostring(sAbilityLevelUpList[1])) or ""))
+	end
+
 	if #sAbilityLevelUpList >= 1
 	and bot:GetAbilityPoints() > 0
 	then
 		if J.IsTryingtoUseAbility(bot) then return end
 		local abilityName = sAbilityLevelUpList[1]
+
+		-- Skip nil entries in skill list (can happen with broken talent mappings)
+		if abilityName == nil then
+			print("[WARN] Nil entry in sAbilityLevelUpList for "..botName..", removing")
+			table.remove(sAbilityLevelUpList, 1)
+			return
+		end
+
 		local abilityToLevelup = bot:GetAbilityByName( abilityName )
+
+		-- ARDM: if the ability doesn't exist on this hero, the skill list may have been
+		-- built when the hero was still sleeping/uninitialized. Try to rebuild it.
+		if abilityToLevelup == nil and GetGameMode() == GAMEMODE_ARDM then
+			local abilityList = J.Skill.GetAbilityList(bot)
+			local talentList = J.Skill.GetTalentList(bot)
+			if #abilityList >= 3 then
+				print("[ARDM] Ability '"..abilityName.."' not found on "..botName..", rebuilding skill list (abilities: "..#abilityList..", talents: "..#talentList..")")
+				sAbilityLevelUpList = J.Utils.CombineTablesUnique(talentList, abilityList)
+				return -- retry with fresh list next frame
+			else
+				print("[ARDM] Abilities not ready for "..botName.." ("..#abilityList.."), waiting")
+				return
+			end
+		end
 
 		if abilityName == 'npc_dota_hero_kez'
 		and (abilityToLevelup == nil or abilityToLevelup:IsHidden()) then
@@ -135,24 +226,33 @@ local function AbilityLevelUpComplement()
 		end
 
 		-- fix phoenix_fire_spirits can't upgrade bug.
-		if abilityName == 'phoenix_fire_spirits'
-		and not bot:GetAbilityByName('phoenix_launch_fire_spirit'):IsHidden() then
-			return
+		if abilityName == 'phoenix_fire_spirits' then
+			local hLaunchSpirit = bot:GetAbilityByName('phoenix_launch_fire_spirit')
+			if hLaunchSpirit ~= nil and not hLaunchSpirit:IsHidden() then
+				return
+			end
 		end
 
 		-- fix 'alchemist_unstable_concoction can't upgrade bug.
-		if abilityName == 'alchemist_unstable_concoction'
-		and not bot:GetAbilityByName('alchemist_unstable_concoction_throw'):IsHidden() then
+		if abilityName == 'alchemist_unstable_concoction' then
+			local hConcThrow = bot:GetAbilityByName('alchemist_unstable_concoction_throw')
+			if hConcThrow ~= nil and not hConcThrow:IsHidden() then
+				return
+			end
+		end
+
+		-- ARDM: ability doesn't exist on this hero — skip it
+		if abilityToLevelup == nil then
+			print("[ARDM] Ability "..abilityName.." not found on "..botName..", skipping")
+			table.remove( sAbilityLevelUpList, 1 )
 			return
 		end
 
-		if abilityToLevelup ~= nil
-			and not abilityToLevelup:IsHidden()
+		if not abilityToLevelup:IsHidden()
 		    and botLevel >= abilityToLevelup:GetHeroLevelRequiredToUpgrade()
 			and abilityToLevelup:CanAbilityBeUpgraded()
 			and abilityToLevelup:GetLevel() < abilityToLevelup:GetMaxLevel()
 		then
-			-- print('Trying to upgrade '..abilityToLevelup:GetName())
 			bot:ActionImmediate_LevelAbility(abilityToLevelup:GetName())
 			table.remove( sAbilityLevelUpList, 1 )
 		elseif abilityName == 'generic_hidden' then
@@ -167,7 +267,6 @@ local function AbilityLevelUpComplement()
 			print("[WARN] Level up ability "..abilityName.." for "..botName.." may fail because it was called on ability that's not available or can't get upgraded anymore.")
 			bot:ActionImmediate_LevelAbility(abilityName)
 			table.remove( sAbilityLevelUpList, 1 )
-			-- bot:ActionImmediate_LevelAbility('special_bonus_attributes')
 		else
 			print("[WARN] Skipped to level up ability "..abilityName.." for "..botName.." for this time because it may fail.")
 			if botLevel > 25 then
@@ -179,6 +278,12 @@ local function AbilityLevelUpComplement()
 
 	if botLevel > 25 and botLevel < 30 and bot:GetAbilityPoints() >= 1 and #sAbilityLevelUpList <= 3 then
 		sAbilityLevelUpList = J.Utils.CombineTablesUnique(J.Skill.GetTalentList( bot ), J.Skill.GetAbilityList( bot ))
+	end
+
+	-- ARDM fallback: if skill list is empty but we still have points, rebuild from current abilities
+	if GetGameMode() == GAMEMODE_ARDM and #sAbilityLevelUpList == 0 and bot:GetAbilityPoints() > 0 then
+		print("[ARDM] Skill list exhausted for "..botName.." at Lv"..botLevel.." with "..bot:GetAbilityPoints().." points, rebuilding")
+		sAbilityLevelUpList = J.Utils.CombineTablesUnique(J.Skill.GetTalentList(bot), J.Skill.GetAbilityList(bot))
 	end
 end
 
@@ -397,6 +502,8 @@ local function BuybackUsageComplement()
 	then
 		if fDeathTime == 0 then fDeathTime = DotaTime() end
 	end
+
+	if bot:IsAlive() then return end
 
 	if not bot:HasBuyback() then return end
 
@@ -2149,6 +2256,95 @@ X.ConsiderItemDesire["item_flask"] = function( hItem )
 
 end
 
+-- Healing Lotus helper (item_famango / item_great_famango / item_greater_famango)
+-- All three restore HP+mana and can target allies. Differ by thresholds and priority.
+-- Thresholds use REMAINING ratios (0.0-1.0) not absolute missing values, because
+-- a hero at 30% HP is critical regardless of their max HP pool.
+local function ConsiderHealingLotus(hItem, sLabel, nSelfHPRatio, nSelfMPRatio, nAllyHPRatio, nFountainDist, bCoresDrop, bEmergency, bPrioritizeCores)
+	if bot:DistanceFromFountain() < nFountainDist then return BOT_ACTION_DESIRE_NONE end
+
+	local sCastType = 'unit'
+	local nInRangeEnmyList = J.GetNearbyHeroes(bot, 900, true, BOT_MODE_NONE)
+	local botHP = J.GetHP(bot)
+	local botMP = bot:GetMaxMana() > 0 and (bot:GetMana() / bot:GetMaxMana()) or 1
+
+	-- Cores drop normal/great lotus after 30min (not worth the slot late game)
+	if bCoresDrop and DotaTime() > 30 * 60 and J.IsCore(bot) then
+		return BOT_ACTION_DESIRE_NONE
+	end
+
+	-- Emergency self-use in combat (greater lotus only)
+	if bEmergency then
+		if botHP < 0.35 or (botHP < 0.5 and botMP < 0.3) then
+			if J.IsRetreating(bot) or J.IsGoingOnSomeone(bot) or #nInRangeEnmyList >= 1 then
+				return BOT_ACTION_DESIRE_HIGH, bot, sCastType, 'Emergency self ('..sLabel..')'
+			end
+		end
+	end
+
+	-- Use on self when safe and HP or mana is below threshold
+	if (botHP < nSelfHPRatio or botMP < nSelfMPRatio)
+		and #nInRangeEnmyList == 0
+		and not bot:WasRecentlyDamagedByAnyHero(2.2)
+		and not bot:HasModifier("modifier_flask_healing")
+		and not bot:HasModifier("modifier_filler_heal")
+	then
+		return BOT_ACTION_DESIRE_HIGH, bot, sCastType, 'Self heal ('..sLabel..')'
+	end
+
+	-- Use on nearby ally who is low on HP
+	local hAllyList = J.GetAlliesNearLoc(bot:GetLocation(), 700)
+	local hBestAlly = nil
+	local nBestScore = 0
+	for _, npcAlly in pairs(hAllyList) do
+		if J.IsValid(npcAlly) and npcAlly ~= bot
+			and not npcAlly:IsIllusion()
+			and not npcAlly:HasModifier("modifier_flask_healing")
+			and not npcAlly:HasModifier("modifier_filler_heal")
+			and (bEmergency or not npcAlly:WasRecentlyDamagedByAnyHero(3.0))
+		then
+			local nAllyHP = npcAlly:GetHealth() / npcAlly:GetMaxHealth()
+			local nAllyMP = npcAlly:GetMaxMana() > 0 and (npcAlly:GetMana() / npcAlly:GetMaxMana()) or 1
+			if nAllyHP < nAllyHPRatio or nAllyMP < nAllyHPRatio then
+				-- Score: lower HP = higher priority. Cores get bonus.
+				local nScore = (1 - nAllyHP) + (1 - nAllyMP) * 0.5
+				if bPrioritizeCores and J.IsCore(npcAlly) then nScore = nScore * 1.5 end
+				if nScore > nBestScore then
+					hBestAlly = npcAlly
+					nBestScore = nScore
+				end
+			end
+		end
+	end
+	if hBestAlly ~= nil and (bEmergency or #nInRangeEnmyList == 0) then
+		return BOT_ACTION_DESIRE_HIGH, hBestAlly, sCastType, 'Heal ally ('..sLabel..'): '..J.Chat.GetNormName(hBestAlly)
+	end
+
+	return BOT_ACTION_DESIRE_NONE
+end
+
+--[[
+  Ally scoring uses (1 - HP%) + (1 - MP%) * 0.5 — a hero at 20% HP and 50% MP scores much higher than one at 80% HP and 10% MP, reflecting that HP is more critical than mana.
+  ┌────────────────────────┬───────┬─────────────┬───────────────────────────────┐
+  │                        │ Lotus │ Great Lotus │         Greater Lotus         │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Self use when HP below │ 70%   │ 60%         │ 50%                           │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Self use when MP below │ 50%   │ 40%         │ 30%                           │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Ally use when HP below │ 60%   │ 50%         │ 50%                           │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Emergency combat use   │ no    │ no          │ yes (HP<35% or HP<50%+MP<30%) │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Prioritize cores       │ no    │ no          │ yes (1.5x score)              │
+  ├────────────────────────┼───────┼─────────────┼───────────────────────────────┤
+  │ Cores drop after 30min │ yes   │ yes         │ no                            │
+  └────────────────────────┴───────┴─────────────┴───────────────────────────────┘
+]]
+X.ConsiderItemDesire["item_famango"]         = function(h) return ConsiderHealingLotus(h, "lotus",         0.7, 0.5, 0.6, 3000, true,  false, false) end
+X.ConsiderItemDesire["item_great_famango"]   = function(h) return ConsiderHealingLotus(h, "great lotus",   0.6, 0.4, 0.5, 3000, true,  false, false) end
+X.ConsiderItemDesire["item_greater_famango"] = function(h) return ConsiderHealingLotus(h, "greater lotus", 0.5, 0.3, 0.5, 1200, false, true,  true)  end
+
 --推推
 X.ConsiderItemDesire["item_force_staff"] = function( hItem )
 
@@ -3823,7 +4019,7 @@ X.ConsiderItemDesire["item_refresher"] = function( hItem )
 	local nInRangeEnmyList = J.GetNearbyHeroes(bot, nCastRange, true, BOT_MODE_NONE )
 
 	-- if bot has an overrided version of CanUseRefresherShard logic:
-	if BotBuild.CanUseRefresherShard ~= nil and BotBuild.CanUseRefresherShard() then
+	if BotBuild ~= nil and BotBuild.CanUseRefresherShard ~= nil and BotBuild.CanUseRefresherShard() then
 		return BOT_ACTION_DESIRE_HIGH, hEffectTarget, sCastType, sCastMotive
 	end
 
@@ -8126,6 +8322,7 @@ local function UseGlyph()
 end
 
 function ItemUsageThink()
+	if RefreshBotHandle() then return end
 	if bot:IsInvulnerable() or not bot:IsHero() or not bot:IsAlive() or not string.find(botName, "hero") or bot:IsIllusion() then return end
 	if bot.lastItemFrameProcessTime == nil then bot.lastItemFrameProcessTime = DotaTime() end
 	if DotaTime() > 30 and (DotaTime() - bot.lastItemFrameProcessTime < (bot.frameProcessTime * (1 + Customize.ThinkLess))) then return end
@@ -8134,14 +8331,16 @@ function ItemUsageThink()
 end
 
 function AbilityUsageThink()
+	if RefreshBotHandle() then return end
 	if bot:IsInvulnerable() or not bot:IsHero() or not bot:IsAlive() or not string.find(botName, "hero") or bot:IsIllusion() then return end
 	if bot.lastAbilityFrameProcessTime == nil then bot.lastAbilityFrameProcessTime = DotaTime() end
 	if DotaTime() > 30 and (DotaTime() - bot.lastAbilityFrameProcessTime < (bot.frameProcessTime * (1 + Customize.ThinkLess))) and bot.isBear == nil then return end
 	bot.lastAbilityFrameProcessTime = DotaTime()
-	if not J.IsNoAbilityIllution(bot) then BotBuild.SkillsComplement() end
+	if BotBuild ~= nil and not J.IsNoAbilityIllution(bot) then BotBuild.SkillsComplement() end
 end
 
 function BuybackUsageThink()
+	if RefreshBotHandle() then return end
 	if bot.lastBuybackFrameProcessTime == nil then bot.lastBuybackFrameProcessTime = DotaTime() end
 	if DotaTime() > 30 and (DotaTime() - bot.lastBuybackFrameProcessTime < 2) then return end
 	bot.lastBuybackFrameProcessTime = DotaTime()
@@ -8150,6 +8349,7 @@ function BuybackUsageThink()
 end
 
 function CourierUsageThink()
+	if RefreshBotHandle() then return end
 	if bot.lastCourierFrameProcessTime == nil then bot.lastCourierFrameProcessTime = DotaTime() end
 	if DotaTime() > 30 and (DotaTime() - bot.lastCourierFrameProcessTime < 0.5) then return end
 	bot.lastCourierFrameProcessTime = DotaTime()
@@ -8157,6 +8357,7 @@ function CourierUsageThink()
 end
 
 function AbilityLevelUpThink()
+	if RefreshBotHandle() then return end
 	if bot.lastLevelUpFrameProcessTime == nil then bot.lastLevelUpFrameProcessTime = DotaTime() end
 	if DotaTime() > 30 and (DotaTime() - bot.lastLevelUpFrameProcessTime < 1) then return end
 	bot.lastLevelUpFrameProcessTime = DotaTime()

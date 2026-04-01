@@ -17,6 +17,7 @@ This is a step-by-step runbook for quickly updating the bot scripts when Valve r
 | **d2vpkr shops.txt** | `https://raw.githubusercontent.com/dotabuff/d2vpkr/master/dota/scripts/shops.txt` | Current item pool -- diff against aba_item.lua |
 | **d2vpkr neutral_items.txt** | `https://raw.githubusercontent.com/dotabuff/d2vpkr/master/dota/scripts/npc/neutral_items.txt` | Current neutral item tiers |
 | **Liquipedia** | `https://liquipedia.net/dota2/HERO_NAME` | Ability details, targeting types (verify before trusting patch summaries) |
+| **Liquipedia Cheats (Internal Names)** | `https://liquipedia.net/dota2/Cheats` | Authoritative `item_*` internal names for all items, neutral items, and hero code names. Essential for item builds and ability references |
 | **Official patch page** | `https://www.dota2.com/patches/X.XX` | Human-readable notes (JS-rendered, use datafeed API instead for programmatic access) |
 
 ### Quick Check: Are We Up to Date?

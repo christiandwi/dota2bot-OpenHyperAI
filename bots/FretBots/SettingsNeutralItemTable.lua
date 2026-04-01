@@ -3,6 +3,9 @@
 
 local neutral_items =
 {
+    -- Matched to d2vpkr/dota/scripts/npc/neutral_items.txt (authoritative source)
+    -- Source: https://github.com/dotabuff/d2vpkr/blob/master/dota/scripts/npc/neutral_items.txt
+
 	-- Just going to comment out items we don"t want entirely rather than force the code to do a rollup on the roles count
 	-- roles{} arrays are the desire weights for roles {1,2,3,4,5}
 	-- {name="item_arcane_ring",			tier=1,		ranged=1,		melee=1,		roles={1,1,1,2,2},		realName="Arcane Ring"},
@@ -161,64 +164,62 @@ local neutral_items =
 }
 
 local enhancements = {
-    -- Tier 1 enhancements
-    { name = "item_enhancement_mystical", tier = 1, roles = {1, 1, 1, 1, 1}, realName = "Mystical Enhancement" },
-    { name = "item_enhancement_brawny",    tier = 1, roles = {1, 1, 3, 2, 2}, realName = "Brawny Enhancement" },
-    { name = "item_enhancement_alert",     tier = 1, roles = {1, 2, 1, 1, 1}, realName = "Alert Enhancement" },
-    { name = "item_enhancement_tough",     tier = 1, roles = {1, 1, 2, 2, 1}, realName = "Tough Enhancement" },
+    -- Matched to d2vpkr/dota/scripts/npc/neutral_items.txt (authoritative source)
+    -- Source: https://github.com/dotabuff/d2vpkr/blob/master/dota/scripts/npc/neutral_items.txt
+
+    -- Tier 1
     { name = "item_enhancement_quickened", tier = 1, roles = {1, 1, 1, 2, 1}, realName = "Quickened Enhancement" },
     { name = "item_enhancement_vital",     tier = 1, roles = {1, 1, 1, 1, 1}, realName = "Vital Enhancement" },
+    { name = "item_enhancement_brawny",    tier = 1, roles = {1, 1, 3, 2, 2}, realName = "Brawny Enhancement" },
+    { name = "item_enhancement_tough",     tier = 1, roles = {1, 1, 2, 2, 1}, realName = "Tough Enhancement" },
+    { name = "item_enhancement_alert",     tier = 1, roles = {1, 2, 1, 1, 1}, realName = "Alert Enhancement" },
+    { name = "item_enhancement_mystical",  tier = 1, roles = {1, 1, 1, 1, 1}, realName = "Mystical Enhancement" },
 
-    -- Tier 2 enhancements
-    { name = "item_enhancement_mystical", tier = 2, roles = {1, 1, 1, 1, 1}, realName = "Mystical Enhancement" },
-    { name = "item_enhancement_brawny",    tier = 2, roles = {1, 1, 3, 2, 2}, realName = "Brawny Enhancement" },
-    { name = "item_enhancement_alert",     tier = 2, roles = {1, 2, 1, 1, 1}, realName = "Alert Enhancement" },
-    { name = "item_enhancement_tough",     tier = 2, roles = {1, 1, 2, 2, 1}, realName = "Tough Enhancement" },
+    -- Tier 2
     { name = "item_enhancement_quickened", tier = 2, roles = {1, 1, 1, 2, 1}, realName = "Quickened Enhancement" },
-    { name = "item_enhancement_keen_eyed", tier = 2, roles = {1, 1, 1, 1, 2}, realName = "Keen Eyed Enhancement" },
-    { name = "item_enhancement_vast",      tier = 2, roles = {1, 1, 1, 1, 1}, realName = "Vast Enhancement" },
     { name = "item_enhancement_greedy",    tier = 2, roles = {1, 1, 1, 2, 2}, realName = "Greedy Enhancement" },
-    { name = "item_enhancement_vampiric",  tier = 2, roles = {1, 1, 1, 1, 1}, realName = "Vampiric Enhancement" },
+    { name = "item_enhancement_brawny",    tier = 2, roles = {1, 1, 3, 2, 2}, realName = "Brawny Enhancement" },
+    { name = "item_enhancement_tough",     tier = 2, roles = {1, 1, 2, 2, 1}, realName = "Tough Enhancement" },
+    { name = "item_enhancement_crude",     tier = 2, roles = {2, 1, 2, 1, 1}, realName = "Crude Enhancement" },
+    { name = "item_enhancement_alert",     tier = 2, roles = {1, 2, 1, 1, 1}, realName = "Alert Enhancement" },
     { name = "item_enhancement_nimble",    tier = 2, roles = {1, 1, 1, 1, 1}, realName = "Nimble Enhancement" },
-    { name = "item_enhancement_crude",     tier = 2, roles = {1, 1, 1, 1, 1}, realName = "Crude Enhancement" },
+    { name = "item_enhancement_mystical",  tier = 2, roles = {1, 1, 1, 1, 1}, realName = "Mystical Enhancement" },
+    { name = "item_enhancement_keen_eyed", tier = 2, roles = {1, 1, 1, 1, 2}, realName = "Keen Eyed Enhancement" },
     { name = "item_enhancement_titanic",   tier = 2, roles = {1, 1, 1, 1, 1}, realName = "Titanic Enhancement" },
 
-    -- Tier 3 enhancements
-    { name = "item_enhancement_mystical", tier = 3, roles = {1, 1, 1, 1, 1}, realName = "Mystical Enhancement" },
-    { name = "item_enhancement_brawny",    tier = 3, roles = {1, 1, 3, 2, 2}, realName = "Brawny Enhancement" },
-    { name = "item_enhancement_alert",     tier = 3, roles = {1, 2, 1, 1, 1}, realName = "Alert Enhancement" },
-    { name = "item_enhancement_tough",     tier = 3, roles = {1, 1, 2, 2, 1}, realName = "Tough Enhancement" },
+    -- Tier 3
     { name = "item_enhancement_quickened", tier = 3, roles = {1, 1, 1, 2, 1}, realName = "Quickened Enhancement" },
-    { name = "item_enhancement_keen_eyed", tier = 3, roles = {1, 1, 1, 1, 2}, realName = "Keen Eyed Enhancement" },
-    { name = "item_enhancement_vast",      tier = 3, roles = {1, 1, 1, 1, 1}, realName = "Vast Enhancement" },
     { name = "item_enhancement_greedy",    tier = 3, roles = {1, 1, 1, 2, 2}, realName = "Greedy Enhancement" },
-    { name = "item_enhancement_vampiric",  tier = 3, roles = {1, 1, 1, 1, 1}, realName = "Vampiric Enhancement" },
+    { name = "item_enhancement_brawny",    tier = 3, roles = {1, 1, 3, 2, 2}, realName = "Brawny Enhancement" },
+    { name = "item_enhancement_tough",     tier = 3, roles = {1, 1, 2, 2, 1}, realName = "Tough Enhancement" },
+    { name = "item_enhancement_crude",     tier = 3, roles = {2, 1, 2, 1, 1}, realName = "Crude Enhancement" },
+    { name = "item_enhancement_alert",     tier = 3, roles = {1, 2, 1, 1, 1}, realName = "Alert Enhancement" },
     { name = "item_enhancement_nimble",    tier = 3, roles = {1, 1, 1, 1, 1}, realName = "Nimble Enhancement" },
-    { name = "item_enhancement_crude",     tier = 3, roles = {1, 1, 1, 1, 1}, realName = "Crude Enhancement" },
+    { name = "item_enhancement_mystical",  tier = 3, roles = {1, 1, 1, 1, 1}, realName = "Mystical Enhancement" },
+    { name = "item_enhancement_keen_eyed", tier = 3, roles = {1, 1, 1, 1, 2}, realName = "Keen Eyed Enhancement" },
     { name = "item_enhancement_titanic",   tier = 3, roles = {1, 1, 1, 1, 1}, realName = "Titanic Enhancement" },
 
-    -- Tier 4 enhancements
-    { name = "item_enhancement_mystical", tier = 4, roles = {1, 1, 1, 1, 1}, realName = "Mystical Enhancement" },
-    { name = "item_enhancement_brawny",    tier = 4, roles = {1, 1, 3, 2, 2}, realName = "Brawny Enhancement" },
-    { name = "item_enhancement_alert",     tier = 4, roles = {1, 2, 1, 1, 1}, realName = "Alert Enhancement" },
-    { name = "item_enhancement_tough",     tier = 4, roles = {1, 1, 2, 2, 1}, realName = "Tough Enhancement" },
+    -- Tier 4
     { name = "item_enhancement_quickened", tier = 4, roles = {1, 1, 1, 2, 1}, realName = "Quickened Enhancement" },
-    { name = "item_enhancement_vampiric",  tier = 4, roles = {1, 1, 1, 1, 1}, realName = "Vampiric Enhancement" },
-    { name = "item_enhancement_timeless", tier = 4, roles = {1, 1, 1, 1, 1}, realName = "Timeless Enhancement" },
-    { name = "item_enhancement_nimble",   tier = 4, roles = {1, 1, 1, 1, 1}, realName = "Nimble Enhancement" },
-    { name = "item_enhancement_crude",    tier = 4, roles = {1, 1, 1, 1, 1}, realName = "Crude Enhancement" },
-    { name = "item_enhancement_titanic",  tier = 4, roles = {1, 1, 1, 1, 1}, realName = "Titanic Enhancement" },
+    { name = "item_enhancement_timeless",  tier = 4, roles = {1, 1, 1, 1, 1}, realName = "Timeless Enhancement" },
+    { name = "item_enhancement_brawny",    tier = 4, roles = {1, 1, 3, 2, 2}, realName = "Brawny Enhancement" },
+    { name = "item_enhancement_tough",     tier = 4, roles = {1, 1, 2, 2, 1}, realName = "Tough Enhancement" },
+    { name = "item_enhancement_crude",     tier = 4, roles = {2, 1, 2, 1, 1}, realName = "Crude Enhancement" },
+    { name = "item_enhancement_alert",     tier = 4, roles = {1, 2, 1, 1, 1}, realName = "Alert Enhancement" },
+    { name = "item_enhancement_nimble",    tier = 4, roles = {1, 1, 1, 1, 1}, realName = "Nimble Enhancement" },
+    { name = "item_enhancement_mystical",  tier = 4, roles = {1, 1, 1, 1, 1}, realName = "Mystical Enhancement" },
+    { name = "item_enhancement_keen_eyed", tier = 4, roles = {1, 1, 1, 1, 2}, realName = "Keen Eyed Enhancement" },
+    { name = "item_enhancement_titanic",   tier = 4, roles = {1, 1, 1, 1, 1}, realName = "Titanic Enhancement" },
 
-    -- Tier 5 enhancements
-    { name = "item_enhancement_timeless", tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Timeless Enhancement" },
-    { name = "item_enhancement_feverish", tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Feverish Enhancement" },
+    -- Tier 5
+    { name = "item_enhancement_timeless",    tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Timeless Enhancement" },
+    { name = "item_enhancement_evolved",     tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Evolved Enhancement" },
     { name = "item_enhancement_fleetfooted", tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Fleetfooted Enhancement" },
-    { name = "item_enhancement_audacious", tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Audacious Enhancement" },
-    { name = "item_enhancement_evolved",  tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Evolved Enhancement" },
-    { name = "item_enhancement_boundless", tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Boundless Enhancement" },
-    { name = "item_enhancement_wise",     tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Wise Enhancement" },
-    { name = "item_enhancement_hulking",  tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Hulking Enhancement" },
-    { name = "item_enhancement_manic",    tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Manic Enhancement" },
+    { name = "item_enhancement_vampiric",    tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Vampiric Enhancement" },
+    { name = "item_enhancement_hulking",     tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Hulking Enhancement" },
+    { name = "item_enhancement_audacious",   tier = 5, roles = {1, 2, 1, 1, 1}, realName = "Audacious Enhancement" },
+    { name = "item_enhancement_feverish",    tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Feverish Enhancement" },
+    { name = "item_enhancement_manic",       tier = 5, roles = {1, 1, 1, 1, 1}, realName = "Manic Enhancement" },
 }
 
 

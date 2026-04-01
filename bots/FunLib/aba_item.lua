@@ -394,6 +394,9 @@ Item['sCanNotSwitchItems'] = {
 		'item_moon_shard',
 		'item_black_king_bar', -- prevent keep swapping with critical items in other settings
 		-- 'item_ward_sentry', -- prevent keep swapping with critical items in other settings
+		'item_famango',            -- Healing Lotus: ally-castable, higher value than wand
+		'item_great_famango',      -- Great Healing Lotus
+		'item_greater_famango',    -- Greater Healing Lotus: very valuable for supports
 }
 
 Item['sSellList'] = {

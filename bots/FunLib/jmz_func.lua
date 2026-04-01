@@ -5409,11 +5409,18 @@ function J.AdjustLocationWithOffsetTowardsFountain(loc, distance)
 end
 
 function J.IsInLaningPhase()
-	return (
-		(J.IsModeTurbo() and DotaTime() < 8 * 60)
-		or DotaTime() < 12 * 60
-	)
-	and GetBot():GetNetWorth() < 5000
+	local nTime = DotaTime()
+	local bTurbo = J.IsModeTurbo()
+
+	-- Hard time floor: always laning phase before 8min (turbo) / 10min (normal)
+	if bTurbo and nTime < 8 * 60 then return true end
+	if not bTurbo and nTime < 10 * 60 then return true end
+
+	-- Soft extension: still laning up to 10min (turbo) / 14min (normal) if networth is low
+	if bTurbo and nTime < 10 * 60 and GetBot():GetNetWorth() < 8000 then return true end
+	if not bTurbo and nTime < 14 * 60 and GetBot():GetNetWorth() < 8000 then return true end
+
+	return false
 end
 
 function J.IsTormentor(nTarget)
@@ -5770,6 +5777,52 @@ function J.GetHumanPing()
 	end
 
 	return nil, ping
+end
+
+-- Chat a random message from a localization key, once per cooldown per bot
+-- ARDM stale hero detection. Call from any Think function to check if the
+-- script's cached bot handle is outdated.
+-- Returns: isStale (bool), freshBot (handle), freshName (string)
+--   isStale=true  → this script is for a dead hero from a past ARDM life, do nothing
+--   isStale=false → safe to proceed; freshBot/freshName are the current hero
+-- Uses two signals: name comparison (definitive) and IsHeroAlive (covers edge cases
+-- where GetBot() hasn't updated yet but the player already has a new alive hero).
+function J.IsStaleARDMHero(cachedBot, cachedName)
+	if GetGameMode() ~= GAMEMODE_ARDM then
+		return false, cachedBot, cachedName
+	end
+
+	local freshBot = GetBot()
+	local freshName = freshBot:GetUnitName()
+	local nPlayerID = cachedBot:GetPlayerID()
+
+	-- Check 1: name differs AND handle differs → definitely stale
+	if freshName ~= cachedName and freshBot ~= cachedBot then
+		return true, freshBot, freshName
+	end
+
+	-- Check 2: this bot is dead but the player's current hero is alive
+	-- (covers case where GetBot() hasn't switched yet but the player has a new hero)
+	if nPlayerID >= 0 and IsHeroAlive(nPlayerID) and not cachedBot:IsAlive() then
+		-- Only stale if the names also differ (if same name, might just be respawning)
+		if freshName ~= cachedName then
+			return true, freshBot, freshName
+		end
+	end
+
+	return false, freshBot, freshName
+end
+
+function J.ModeAnnounce(bot, locKey, cooldown)
+	local Localization = require( GetScriptDirectory()..'/FunLib/localization' )
+	if bot.lastModeChatTime == nil then bot.lastModeChatTime = {} end
+	local lastTime = bot.lastModeChatTime[locKey] or -999
+	if GameTime() - lastTime < (cooldown or 30) then return end
+	bot.lastModeChatTime[locKey] = GameTime()
+	local msgs = Localization.Get(locKey)
+	if msgs ~= nil and #msgs > 0 then
+		bot:ActionImmediate_Chat(msgs[RandomInt(1, #msgs)], false)
+	end
 end
 
 function J.HasAbility(bot, abilityName)

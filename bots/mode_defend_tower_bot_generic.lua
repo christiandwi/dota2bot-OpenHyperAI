@@ -13,3 +13,8 @@ function GetDesire()
 	if res > 0.6 then J.ModeAnnounce(bot, 'say_defend_bot', 30) end
 	return res
 end
+
+-- DefendThink disabled: aba_defend.lua has critical bugs (shared module-level
+-- state races between bots, Action_AttackMove side-effect in GetDefendDesireHelper,
+-- off-by-one in creep loop, stale action replay). Needs TS source fix before enabling.
+-- function Think() Defend.DefendThink(bot, LANE_BOT) end

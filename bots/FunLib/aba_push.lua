@@ -31,10 +31,14 @@ local BotMode = ____dota.BotMode
 local BotModeDesire = ____dota.BotModeDesire
 local DamageType = ____dota.DamageType
 local Lane = ____dota.Lane
+local Team = ____dota.Team
 local Tower = ____dota.Tower
 local UnitType = ____dota.UnitType
 local ____utils = require(GetScriptDirectory().."/FunLib/utils")
 local IsValidUnit = ____utils.IsValidUnit
+local GetLocationToLocationDistance = ____utils.GetLocationToLocationDistance
+local RadiantFountainTpPoint = ____utils.RadiantFountainTpPoint
+local DireFountainTpPoint = ____utils.DireFountainTpPoint
 local ____global_cache = require(GetScriptDirectory().."/FunLib/global_cache")
 local getGlobalGameState = ____global_cache.getGlobalGameState
 local getGlobalLocationState = ____global_cache.getGlobalLocationState
@@ -150,6 +154,25 @@ function ____exports.GetPushDesireHelper(bot, lane)
     )
     if enemiesAtAncient >= 1 then
         return BotModeDesire.ExtraLow
+    end
+    if #alliesHere <= 1 and gameState.aliveEnemyCount >= 3 then
+        return BotModeDesire.None
+    end
+    if gameState.aliveAllyCount <= gameState.aliveEnemyCount - 2 then
+        return BotModeDesire.None
+    end
+    local enemyFountain = gameState.team == Team.Radiant and DireFountainTpPoint or RadiantFountainTpPoint
+    local laneFront = GetLaneFrontLocation(gameState.team, lane, 0)
+    if GetLocationToLocationDistance(laneFront, enemyFountain) < 5000 then
+        if #alliesHere < 3 or gameState.aliveAllyCount < gameState.aliveEnemyCount then
+            nMaxDesire = math.min(nMaxDesire, 0.08)
+        end
+    end
+    if jmz.GetHP(bot) < 0.5 then
+        nMaxDesire = math.min(nMaxDesire, 0.25)
+    end
+    if gameState.aliveEnemyCount >= 5 and gameState.aliveAllyCount <= gameState.aliveEnemyCount then
+        nMaxDesire = math.min(nMaxDesire, 0.41)
     end
     if botActiveMode == BotMode.PushTowerTop then
         bot.laneToPush = Lane.Top
@@ -784,24 +807,24 @@ function ____exports.PushThink(bot, lane)
     local towerDistanceToFountain = bTowerNearby and GetUnitToLocationDistance(nEnemyTowers[1], vTeamFountain) or 0
     for ____, creep in ipairs(nCreeps) do
         do
-            local __continue113
+            local __continue119
             repeat
                 if not jmz.IsValid(creep) or not jmz.CanBeAttacked(creep) then
-                    __continue113 = true
+                    __continue119 = true
                     break
                 end
                 if jmz.IsTormentor(creep) or jmz.IsRoshan(creep) then
-                    __continue113 = true
+                    __continue119 = true
                     break
                 end
                 if bTowerNearby and GetUnitToLocationDistance(creep, vTeamFountain) >= towerDistanceToFountain then
-                    __continue113 = true
+                    __continue119 = true
                     break
                 end
                 bot:Action_AttackUnit(creep, true)
                 return
             until true
-            if not __continue113 then
+            if not __continue119 then
                 break
             end
         end

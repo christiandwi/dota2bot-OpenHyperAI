@@ -5813,6 +5813,9 @@ function J.IsStaleARDMHero(cachedBot, cachedName)
 	return false, freshBot, freshName
 end
 
+-- Push safety and defend priority logic moved to TS sources:
+-- aba_push.ts (GetPushDesireHelper) and aba_defend.ts (GetDefendDesireHelper)
+
 function J.ModeAnnounce(bot, locKey, cooldown)
 	local Localization = require( GetScriptDirectory()..'/FunLib/localization' )
 	if bot.lastModeChatTime == nil then bot.lastModeChatTime = {} end

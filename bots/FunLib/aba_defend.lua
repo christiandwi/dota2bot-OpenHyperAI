@@ -901,6 +901,30 @@ function ____exports.GetDefendDesireHelper(bot, lane)
     if botLevel < 3 then
         return BotModeDesire.None
     end
+    local teamIsPushing = false
+    do
+        local i = 1
+        while i <= #GetTeamPlayers(nTeam) do
+            local member = GetTeamMember(i)
+            if member and member ~= bot and member:IsAlive() then
+                local mode = member:GetActiveMode()
+                if mode == BotMode.PushTowerTop or mode == BotMode.PushTowerMid or mode == BotMode.PushTowerBot then
+                    local alliesNear = jmz.GetAlliesNearLoc(
+                        member:GetLocation(),
+                        1600
+                    )
+                    if #alliesNear >= 3 then
+                        teamIsPushing = true
+                        break
+                    end
+                end
+            end
+            i = i + 1
+        end
+    end
+    if teamIsPushing then
+        return BotModeDesire.VeryLow
+    end
     local recentlyHit = bot:WasRecentlyDamagedByAnyHero(5) or bot:WasRecentlyDamagedByTower(5)
     local threatenedLane = GetThreatenedLane()
     local panic = {active = false, floor = 0}

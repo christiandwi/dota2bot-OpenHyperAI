@@ -355,6 +355,34 @@ function X.ConsiderQ()
 		end
 	end
 
+	--Farming: use Arc Lightning on neutral/lane creeps
+	if J.IsFarming( bot ) and J.GetManaAfter( manaCost ) > 0.3
+	then
+		local nNeutralCreeps = bot:GetNearbyNeutralCreeps( nCastRange )
+		if #nNeutralCreeps >= 2
+			or ( #nNeutralCreeps >= 1 and J.IsValid( nNeutralCreeps[1] ) and nNeutralCreeps[1]:IsAncientCreep() )
+		then
+			return BOT_ACTION_DESIRE_HIGH, nNeutralCreeps[1]
+		end
+		local nLaneCreeps = bot:GetNearbyLaneCreeps( nCastRange, true )
+		if #nLaneCreeps >= 3
+		then
+			return BOT_ACTION_DESIRE_HIGH, nLaneCreeps[1]
+		end
+	end
+
+	--Roshan: use Arc Lightning on Roshan
+	if J.IsDoingRoshan( bot )
+	then
+		local botTarget = J.GetProperTarget( bot )
+		if J.IsRoshan( botTarget )
+			and J.IsInRange( bot, botTarget, nCastRange )
+			and J.GetManaAfter( manaCost ) > 0.3
+		then
+			return BOT_ACTION_DESIRE_HIGH, botTarget
+		end
+	end
+
 	return BOT_ACTION_DESIRE_NONE, nil
 end
 

@@ -2,7 +2,7 @@ import * as jmz from "bots/FunLib/jmz_func";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import Customize = require("bots/Customize/general");
 import { Barracks, BotMode, BotModeDesire, DamageType, Lane, Team, Tower, Unit, UnitType, Vector } from "bots/ts_libs/dota";
-import { IsValidUnit } from "./utils";
+import { IsValidUnit, GetLocationToLocationDistance, RadiantFountainTpPoint, DireFountainTpPoint } from "./utils";
 import { getGlobalGameState, getGlobalLocationState, getCachedAlliesNearLoc, getCachedEnemiesNearLoc, autoCleanupCache, getCachedData } from "./global_cache";
 
 Customize.ThinkLess = Customize.Enable ? Customize.ThinkLess : 1;
@@ -284,6 +284,32 @@ export function GetPushDesireHelper(bot: Unit, lane: Lane): BotModeDesire {
     const enemiesAtAncient = jmz.Utils.CountEnemyHeroesNear(ourAncient!.GetLocation(), BASE_ANC_RADIUS);
     // If Ancient under direct pressure → strongly deprioritize pushes
     if (enemiesAtAncient >= 1) return BotModeDesire.ExtraLow;
+
+    // --- Push safety gates ---
+    // Never push alone when 3+ enemies alive
+    if (alliesHere.length <= 1 && gameState.aliveEnemyCount >= 3) {
+        return BotModeDesire.None;
+    }
+    // Never push with 2+ hero count disadvantage
+    if (gameState.aliveAllyCount <= gameState.aliveEnemyCount - 2) {
+        return BotModeDesire.None;
+    }
+    // Don't push deep (past T2 toward enemy base) when alone or outnumbered
+    const enemyFountain = gameState.team === Team.Radiant ? DireFountainTpPoint : RadiantFountainTpPoint;
+    const laneFront = GetLaneFrontLocation(gameState.team, lane, 0);
+    if (GetLocationToLocationDistance(laneFront, enemyFountain) < 5000) {
+        if (alliesHere.length < 3 || gameState.aliveAllyCount < gameState.aliveEnemyCount) {
+            nMaxDesire = math.min(nMaxDesire, 0.08);
+        }
+    }
+    // Reduce desire when low HP
+    if (jmz.GetHP(bot) < 0.5) {
+        nMaxDesire = math.min(nMaxDesire, 0.25);
+    }
+    // Caution when all enemies alive and no advantage
+    if (gameState.aliveEnemyCount >= 5 && gameState.aliveAllyCount <= gameState.aliveEnemyCount) {
+        nMaxDesire = math.min(nMaxDesire, 0.41);
+    }
 
     // Sync lane selection with hard bot modes
     if (botActiveMode === BotMode.PushTowerTop) {

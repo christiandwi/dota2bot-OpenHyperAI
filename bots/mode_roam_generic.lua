@@ -1650,6 +1650,10 @@ ConsiderHeroSpecificRoaming['npc_dota_hero_void_spirit'] = function ()
 	return BOT_MODE_DESIRE_NONE
 end
 
+ConsiderHeroSpecificRoaming['npc_dota_hero_elder_titan'] = function ()
+	return CheckHighPriorityChannelAbility("elder_titan_echo_stomp")
+end
+
 ConsiderHeroSpecificRoaming['npc_dota_hero_primal_beast'] = function ()
 	cAbility = bot:GetAbilityByName("primal_beast_onslaught")
 	if cAbility:IsTrained()

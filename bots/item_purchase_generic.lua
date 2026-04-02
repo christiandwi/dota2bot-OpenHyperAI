@@ -1014,6 +1014,45 @@ function ItemPurchaseThink()
 		end
 	end
 
+	-- Ward slot management for supports (pos 4/5):
+	-- Move wards to backpack when not actively warding to free up a main slot.
+	-- Move them back to main inventory when entering ward mode.
+	if J.GetPosition(bot) >= 4 and currentTime > (bot._lastWardSwapTime or 0) + 3 then
+		local bIsWarding = botMode == BOT_MODE_WARD
+		local tWardNames = { 'item_ward_observer', 'item_ward_sentry', 'item_ward_dispenser' }
+
+		for _, wardName in ipairs(tWardNames) do
+			local wardSlot = bot:FindItemSlot(wardName)
+			if wardSlot >= 0 then
+				if bIsWarding then
+					-- Move ward from backpack (6-8) to main inventory if there's a free slot
+					if wardSlot >= 6 and wardSlot <= 8 then
+						for mainSlot = 0, 5 do
+							local mainItem = bot:GetItemInSlot(mainSlot)
+							if mainItem == nil then
+								bot:ActionImmediate_SwapItems(wardSlot, mainSlot)
+								bot._lastWardSwapTime = currentTime
+								break
+							end
+						end
+					end
+				else
+					-- Move ward from main inventory (0-5) to backpack if backpack has space
+					if wardSlot >= 0 and wardSlot <= 5 then
+						for bpSlot = 6, 8 do
+							local bpItem = bot:GetItemInSlot(bpSlot)
+							if bpItem == nil then
+								bot:ActionImmediate_SwapItems(wardSlot, bpSlot)
+								bot._lastWardSwapTime = currentTime
+								break
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
 	if ( GetGameMode() ~= 23 and botLevel > 6 and currentTime > bot.fullInvCheck + 1.0
 		and (botDistanceFromFountain <= 200 or bot:DistanceFromSecretShop() <= 200 ))
 		or ( GetGameMode() == 23 and botLevel > 9 and currentTime > bot.fullInvCheck + 1.0 )
@@ -1121,12 +1160,11 @@ function ItemPurchaseThink()
 		return
 	end
 
-	-- Boots that should be skipped if bot already has different boots.
-	-- Excludes upgrade boots (greaves, bearing, travel) — these are intentional
-	-- upgrades from existing boots and should NOT be skipped.
-	local tBasicBootsOnly = {
-		item_boots = true, item_phase_boots = true, item_power_treads = true,
-		item_tranquil_boots = true, item_arcane_boots = true,
+	-- Only skip raw boots of speed when we already have ANY boots.
+	-- All upgraded boots (treads, phase, arcane, tranquil, greaves, travel,
+	-- bearing) are intentional build items and must NEVER be skipped.
+	local tRawBootsOnly = {
+		item_boots = true,
 	}
 
 	if bot.currBuyingItemInPurchaseList == nil
@@ -1135,7 +1173,7 @@ function ItemPurchaseThink()
 		-- Skip duplicate basic boots (not upgrades like greaves/travel/bearing)
 		while #bot.purchaseListInReverseOrder > 0 do
 			local nextItem = bot.purchaseListInReverseOrder[#bot.purchaseListInReverseOrder]
-			if tBasicBootsOnly[nextItem] and (Item.HasBuyBoots(bot)
+			if tRawBootsOnly[nextItem] and (Item.HasBuyBoots(bot)
 				or Item.HasItem(bot, 'item_guardian_greaves')
 				or Item.HasItem(bot, 'item_travel_boots')
 				or Item.HasItem(bot, 'item_travel_boots_2')

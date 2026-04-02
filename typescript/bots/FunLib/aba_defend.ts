@@ -651,6 +651,26 @@ export function GetDefendDesireHelper(bot: Unit, lane: Lane): BotModeDesire {
         return BotModeDesire.None;
     }
 
+    // Don't abandon a team push to defend a tower from creeps.
+    // If 3+ allies are grouped together pushing, defend desire is very low.
+    let teamIsPushing = false;
+    for (let i = 1; i <= GetTeamPlayers(nTeam).length; i++) {
+        const member = GetTeamMember(i);
+        if (member && member !== bot && member.IsAlive()) {
+            const mode = member.GetActiveMode();
+            if (mode === BotMode.PushTowerTop || mode === BotMode.PushTowerMid || mode === BotMode.PushTowerBot) {
+                const alliesNear = jmz.GetAlliesNearLoc(member.GetLocation(), 1600);
+                if (alliesNear.length >= 3) {
+                    teamIsPushing = true;
+                    break;
+                }
+            }
+        }
+    }
+    if (teamIsPushing) {
+        return BotModeDesire.VeryLow;
+    }
+
     const recentlyHit = bot.WasRecentlyDamagedByAnyHero(5) || bot.WasRecentlyDamagedByTower(5);
 
     // --- Base-first policy ---

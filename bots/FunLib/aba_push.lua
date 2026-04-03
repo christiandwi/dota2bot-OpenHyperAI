@@ -174,6 +174,13 @@ function ____exports.GetPushDesireHelper(bot, lane)
     if gameState.aliveEnemyCount >= 5 and gameState.aliveAllyCount <= gameState.aliveEnemyCount then
         nMaxDesire = math.min(nMaxDesire, 0.41)
     end
+    local closeEnemies = getCachedEnemiesNearLoc(
+        bot:GetLocation(),
+        900
+    )
+    if #closeEnemies > 0 and #alliesHere >= #closeEnemies then
+        nMaxDesire = math.min(nMaxDesire, 0.3)
+    end
     if botActiveMode == BotMode.PushTowerTop then
         bot.laneToPush = Lane.Top
     elseif botActiveMode == BotMode.PushTowerMid then
@@ -807,24 +814,24 @@ function ____exports.PushThink(bot, lane)
     local towerDistanceToFountain = bTowerNearby and GetUnitToLocationDistance(nEnemyTowers[1], vTeamFountain) or 0
     for ____, creep in ipairs(nCreeps) do
         do
-            local __continue119
+            local __continue120
             repeat
                 if not jmz.IsValid(creep) or not jmz.CanBeAttacked(creep) then
-                    __continue119 = true
+                    __continue120 = true
                     break
                 end
                 if jmz.IsTormentor(creep) or jmz.IsRoshan(creep) then
-                    __continue119 = true
+                    __continue120 = true
                     break
                 end
                 if bTowerNearby and GetUnitToLocationDistance(creep, vTeamFountain) >= towerDistanceToFountain then
-                    __continue119 = true
+                    __continue120 = true
                     break
                 end
                 bot:Action_AttackUnit(creep, true)
                 return
             until true
-            if not __continue119 then
+            if not __continue120 then
                 break
             end
         end

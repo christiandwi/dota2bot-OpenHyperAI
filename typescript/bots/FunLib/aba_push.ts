@@ -310,6 +310,11 @@ export function GetPushDesireHelper(bot: Unit, lane: Lane): BotModeDesire {
     if (gameState.aliveEnemyCount >= 5 && gameState.aliveAllyCount <= gameState.aliveEnemyCount) {
         nMaxDesire = math.min(nMaxDesire, 0.41);
     }
+    // Cap push desire when enemy heroes are very close — bot should fight, not push
+    const closeEnemies = getCachedEnemiesNearLoc(bot.GetLocation(), 900);
+    if (closeEnemies.length > 0 && alliesHere.length >= closeEnemies.length) {
+        nMaxDesire = math.min(nMaxDesire, 0.3);
+    }
 
     // Sync lane selection with hard bot modes
     if (botActiveMode === BotMode.PushTowerTop) {

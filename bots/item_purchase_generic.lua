@@ -505,6 +505,7 @@ function ItemPurchaseThink()
 			item_aegis = true, item_rapier = true, item_gem = true,
 			item_cheese = true, item_refresher_shard = true,
 			item_moon_shard = true, item_tpscroll = true,
+			item_famango = true, item_great_famango = true, item_greater_famango = true,
 		}
 
 		-- Collect sellable items sorted by cost (cheapest first)

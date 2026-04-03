@@ -651,6 +651,13 @@ export function GetDefendDesireHelper(bot: Unit, lane: Lane): BotModeDesire {
         return BotModeDesire.None;
     }
 
+    // Cap defend desire when enemy heroes are very close — bot should fight, not defend
+    const closeEnemiesDefend = jmz.GetEnemiesNearLoc(bot.GetLocation(), 900);
+    const closeAlliesDefend = jmz.GetAlliesNearLoc(bot.GetLocation(), 900);
+    if (closeEnemiesDefend.length > 0 && closeAlliesDefend.length >= closeEnemiesDefend.length) {
+        return math.min(0.3, BotModeDesire.Moderate) as BotModeDesire;
+    }
+
     // Don't abandon a team push to defend a tower from creeps.
     // If 3+ allies are grouped together pushing, defend desire is very low.
     let teamIsPushing = false;

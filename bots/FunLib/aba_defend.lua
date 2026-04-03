@@ -901,6 +901,17 @@ function ____exports.GetDefendDesireHelper(bot, lane)
     if botLevel < 3 then
         return BotModeDesire.None
     end
+    local closeEnemiesDefend = jmz.GetEnemiesNearLoc(
+        bot:GetLocation(),
+        900
+    )
+    local closeAlliesDefend = jmz.GetAlliesNearLoc(
+        bot:GetLocation(),
+        900
+    )
+    if #closeEnemiesDefend > 0 and #closeAlliesDefend >= #closeEnemiesDefend then
+        return math.min(0.3, BotModeDesire.Moderate)
+    end
     local teamIsPushing = false
     do
         local i = 1

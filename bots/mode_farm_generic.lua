@@ -390,9 +390,48 @@ function GetDesireHelper()
 			bot.farmLocation = J.GetCenterOfUnits(hLaneCreepList)
 			return Min(RemapValClamped(J.GetHP(bot), 0.2, 0.7, 0.4, BOT_MODE_DESIRE_HIGH), nFarmCap)
 		else
+			-- Early game: prefer lane farming over jungle
+			-- Lane creeps give more gold/XP per minute than jungle camps,
+			-- especially before the bot has farming items.
+			local bEarlyGame = (J.IsModeTurbo() and DotaTime() < 18 * 60 or DotaTime() < 25 * 60)
+				and bot:GetNetWorth() < 15000
+			local nDeaths = GetHeroDeaths(bot:GetPlayerID())
+
+			if bEarlyGame and nDeaths < 5 then
+				-- Find the closest safe lane front to farm
+				local bestLane = nil
+				local bestDist = 99999
+				for _, lane in pairs({LANE_TOP, LANE_MID, LANE_BOT}) do
+					local laneFront = GetLaneFrontLocation(GetTeam(), lane, 0)
+					local dist = GetUnitToLocationDistance(bot, laneFront)
+					local nEnemiesAtLane = J.GetEnemiesNearLoc(laneFront, 1400)
+					-- Only consider safe lanes (no enemies or we're stronger)
+					if #nEnemiesAtLane == 0 and dist < bestDist then
+						bestDist = dist
+						bestLane = lane
+					end
+				end
+
+				if bestLane then
+					local laneFront = GetLaneFrontLocation(GetTeam(), bestLane, 0)
+					bot.farmLocation = laneFront
+					return Min(RemapValClamped(J.GetHP(bot), 0.2, 0.7, 0.35, BOT_MODE_DESIRE_HIGH), nFarmCap)
+				end
+			end
+
+			-- Late game or dangerous lanes: farm jungle camps
 			if preferedCamp == nil then preferedCamp = J.Site.GetClosestNeutralSpwan(bot, availableCamp);end
 
 			if preferedCamp ~= nil then
+				-- Don't farm a camp where an ally is already farming
+				local nCampAllies = J.GetAlliesNearLoc(preferedCamp.cattr.location, 800)
+				for _, ally in pairs(nCampAllies) do
+					if ally ~= bot and J.IsValidHero(ally) and not ally:IsIllusion()
+					and J.IsFarming(ally) then
+						return BOT_MODE_DESIRE_NONE
+					end
+				end
+
 				if not J.Site.IsModeSuitableToFarm(bot)
 				then
 					return BOT_MODE_DESIRE_NONE;
@@ -567,6 +606,27 @@ function Think()
 		local targetFarmLoc = preferedCamp.cattr.location;
 		local cDist = GetUnitToLocationDistance(bot, targetFarmLoc);
 		local nNeutrals = bot:GetNearbyCreeps(900, true);
+
+		-- Don't steal farm from an ally already at this camp
+		local nAllyNearCamp = J.GetAlliesNearLoc(targetFarmLoc, 800)
+		local bAllyFarming = false
+		for _, ally in pairs(nAllyNearCamp) do
+			if ally ~= bot and J.IsValidHero(ally) and not ally:IsIllusion()
+			and J.IsFarming(ally) and J.IsAttacking(ally) then
+				bAllyFarming = true
+				break
+			end
+		end
+		if bAllyFarming and cDist > 400 then
+			-- Pick a different camp instead
+			J.Role['availableCampTable'], preferedCamp = J.Site.UpdateAvailableCamp(bot, preferedCamp, J.Role['availableCampTable']);
+			availableCamp = J.Role['availableCampTable']
+			preferedCamp = J.Site.GetClosestNeutralSpwan(bot, availableCamp)
+			if preferedCamp == nil then return end
+			targetFarmLoc = preferedCamp.cattr.location
+			cDist = GetUnitToLocationDistance(bot, targetFarmLoc)
+			nNeutrals = bot:GetNearbyCreeps(900, true)
+		end
 
 		if #nNeutrals >= 3 and cDist <= 600 and cDist > 240
 		   and ( bot:GetLevel() >= 10 or not nNeutrals[1]:IsAncientCreep())

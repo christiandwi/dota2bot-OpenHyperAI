@@ -879,8 +879,8 @@ local HeroPositions = {
         20
     },
     [HeroName.Kez] = {
+        50,
         40,
-        45,
         5,
         0,
         0

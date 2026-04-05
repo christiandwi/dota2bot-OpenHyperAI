@@ -2,7 +2,7 @@ import * as jmz from "bots/FunLib/jmz_func";
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 import Customize = require("bots/Customize/general");
 import { Barracks, BotMode, BotModeDesire, DamageType, Lane, Team, Tower, Unit, UnitType, Vector } from "bots/ts_libs/dota";
-import { IsValidUnit } from "./utils";
+import { IsValidUnit, GetLocationToLocationDistance, RadiantFountainTpPoint, DireFountainTpPoint } from "./utils";
 import { getGlobalGameState, getGlobalLocationState, getCachedAlliesNearLoc, getCachedEnemiesNearLoc, autoCleanupCache, getCachedData } from "./global_cache";
 
 Customize.ThinkLess = Customize.Enable ? Customize.ThinkLess : 1;
@@ -77,7 +77,7 @@ type CachedBotState = {
 
 const PUSH_CACHE_TTL = 0.5; // 500ms cache TTL - increased for better performance
 const BOT_CACHE_TTL = 0.2; // 200ms cache TTL for bot-specific data - increased for better performance
-const THINK_INTERVAL = 1 / 30; // Limit Think methods to 30 FPS max
+// Frame rate limiter removed — caused stale action replay and shared state bugs
 let gameStateCache: CachedGameState | null = null;
 let locationStateCache: CachedLocationState | null = null;
 let unitStateCache: CachedUnitState | null = null;
@@ -284,6 +284,37 @@ export function GetPushDesireHelper(bot: Unit, lane: Lane): BotModeDesire {
     const enemiesAtAncient = jmz.Utils.CountEnemyHeroesNear(ourAncient!.GetLocation(), BASE_ANC_RADIUS);
     // If Ancient under direct pressure → strongly deprioritize pushes
     if (enemiesAtAncient >= 1) return BotModeDesire.ExtraLow;
+
+    // --- Push safety gates ---
+    // Never push alone when 3+ enemies alive
+    if (alliesHere.length <= 1 && gameState.aliveEnemyCount >= 3) {
+        return BotModeDesire.None;
+    }
+    // Never push with 2+ hero count disadvantage
+    if (gameState.aliveAllyCount <= gameState.aliveEnemyCount - 2) {
+        return BotModeDesire.None;
+    }
+    // Don't push deep (past T2 toward enemy base) when alone or outnumbered
+    const enemyFountain = gameState.team === Team.Radiant ? DireFountainTpPoint : RadiantFountainTpPoint;
+    const laneFront = GetLaneFrontLocation(gameState.team, lane, 0);
+    if (GetLocationToLocationDistance(laneFront, enemyFountain) < 5000) {
+        if (alliesHere.length < 3 || gameState.aliveAllyCount < gameState.aliveEnemyCount) {
+            nMaxDesire = math.min(nMaxDesire, 0.08);
+        }
+    }
+    // Reduce desire when low HP
+    if (jmz.GetHP(bot) < 0.5) {
+        nMaxDesire = math.min(nMaxDesire, 0.25);
+    }
+    // Caution when all enemies alive and no advantage
+    if (gameState.aliveEnemyCount >= 5 && gameState.aliveAllyCount <= gameState.aliveEnemyCount) {
+        nMaxDesire = math.min(nMaxDesire, 0.41);
+    }
+    // Cap push desire when enemy heroes are very close — bot should fight, not push
+    const closeEnemies = getCachedEnemiesNearLoc(bot.GetLocation(), 900);
+    if (closeEnemies.length > 0 && alliesHere.length >= closeEnemies.length) {
+        nMaxDesire = math.min(nMaxDesire, 0.3);
+    }
 
     // Sync lane selection with hard bot modes
     if (botActiveMode === BotMode.PushTowerTop) {
@@ -690,36 +721,9 @@ export function WhichLaneToPush(_bot: Unit, _lane: Lane): Lane {
  * Think loop
  * ---------------------------------------------------------------------------*/
 let fNextMovementTime = 0;
-let lastThinkTime = 0;
-let lastAction: { type: string; target?: Unit | Vector; time: number } | null = null;
 
 export function PushThink(bot: Unit, lane: Lane): void {
-    // 0) Frame rate limiting for performance
     const now = DotaTime();
-    if (now - lastThinkTime < THINK_INTERVAL) {
-        // Continue last action to prevent idle bots
-        if (lastAction && now - lastAction.time < 2.0) {
-            switch (lastAction.type) {
-                case "attack":
-                    if (lastAction.target && typeof lastAction.target === "object" && "GetLocation" in lastAction.target) {
-                        bot.Action_AttackUnit(lastAction.target as Unit, true);
-                    }
-                    break;
-                case "move":
-                    if (lastAction.target && typeof lastAction.target === "object" && "x" in lastAction.target) {
-                        bot.Action_MoveToLocation(lastAction.target as Vector);
-                    }
-                    break;
-                case "attackMove":
-                    if (lastAction.target && typeof lastAction.target === "object" && "x" in lastAction.target) {
-                        bot.Action_AttackMove(lastAction.target as Vector);
-                    }
-                    break;
-            }
-        }
-        return;
-    }
-    lastThinkTime = now;
 
     // 1) baseline action gates
     if (jmz.CanNotUseAction(bot)) return;
@@ -803,7 +807,6 @@ export function PushThink(bot: Unit, lane: Lane): void {
         if (bot.GetActualIncomingDamage(nDamage, DamageType.Physical) / bot.GetHealth() > 0.15 || nAllyCreeps.length > 2) {
             const retreat = Math.min(fDeltaFromFront - 200, -300);
             const retreatLoc = GetLaneFrontLocation(gameState.team, lane, retreat);
-            lastAction = { type: "move", target: retreatLoc, time: now };
             bot.Action_MoveToLocation(retreatLoc);
             return;
         }
@@ -822,7 +825,6 @@ export function PushThink(bot: Unit, lane: Lane): void {
             hEnemyAncient.GetHealthRegen() < 20 ||
             (alliesNearAncient?.length ?? 0) >= 4)
     ) {
-        lastAction = { type: "attack", target: hEnemyAncient, time: now };
         bot.Action_AttackUnit(hEnemyAncient, true);
         return;
     }
@@ -849,7 +851,6 @@ export function PushThink(bot: Unit, lane: Lane): void {
 
         if (bTowerNearby && GetUnitToLocationDistance(creep, vTeamFountain) >= towerDistanceToFountain) continue;
 
-        lastAction = { type: "attack", target: creep, time: now };
         bot.Action_AttackUnit(creep, true);
         return;
     }
@@ -859,10 +860,8 @@ export function PushThink(bot: Unit, lane: Lane): void {
     const hgTarget = SelectOrStickHGTarget(bot, lane, targetLoc);
     if (hgTarget) {
         if (jmz.IsInRange(bot, hgTarget, botAttackRange + 150)) {
-            lastAction = { type: "attack", target: hgTarget, time: now };
             bot.Action_AttackUnit(hgTarget, true);
         } else {
-            lastAction = { type: "move", target: hgTarget.GetLocation(), time: now };
             bot.Action_MoveToLocation(hgTarget.GetLocation());
         }
         return;
@@ -870,13 +869,11 @@ export function PushThink(bot: Unit, lane: Lane): void {
 
     // 10) Movement fallback: path to approach point, then do small attack-move jitter to hold space
     if (botState.distanceToTargetLoc > 500) {
-        lastAction = { type: "move", target: targetLoc, time: now };
         bot.Action_MoveToLocation(targetLoc);
         return;
     } else {
         if (DotaTime() >= fNextMovementTime) {
             const attackMoveLoc = jmz.GetRandomLocationWithinDist(targetLoc, 0, 400);
-            lastAction = { type: "attackMove", target: attackMoveLoc, time: now };
             bot.Action_AttackMove(attackMoveLoc);
             fNextMovementTime = DotaTime() + RandomFloat(0.05, 0.3);
             return;

@@ -114,11 +114,20 @@ local tARDMNeverRebuy = {
 }
 
 local function _stillNeeds(itemName)
-	-- Don't buy basic boots if we already have any upgraded boots
-	if itemName == 'item_boots' and Item.HasBuyBoots(bot) then
-		-- Exception: building travel boots requires selling old boots + buying new boots component
-		if bot.currBuyingItemInPurchaseList ~= 'item_travel_boots'
-		and bot.currBuyingItemInPurchaseList ~= 'item_travel_boots_2' then
+	-- Don't buy a second pair of basic boots if we already have upgraded boots.
+	-- BUT allow buying item_boots when it's a COMPONENT of the current build target
+	-- (e.g., building power_treads needs item_boots as a component — don't skip it).
+	if itemName == 'item_boots' then
+		local currentTarget = bot.currBuyingItemInPurchaseList
+		-- Only skip if we have upgraded boots AND the current target is NOT a boots upgrade
+		-- (i.e., we're not building treads/arcane/tranquil/phase from basic boots)
+		local tBootsUpgrades = {
+			item_power_treads = true, item_phase_boots = true,
+			item_arcane_boots = true, item_tranquil_boots = true,
+			item_travel_boots = true, item_travel_boots_2 = true,
+			item_guardian_greaves = true, item_boots_of_bearing = true,
+		}
+		if Item.HasBootsInMainSolt(bot) and not tBootsUpgrades[currentTarget] then
 			return false
 		end
 	end
@@ -460,7 +469,7 @@ function ItemPurchaseThink()
 		local tSkipBoots = {
 			item_boots = true, item_phase_boots = true, item_power_treads = true,
 			item_tranquil_boots = true, item_arcane_boots = true,
-			item_guardian_greaves = true, item_boots_of_bearing = true,
+			-- greaves/bearing/travel are intentional upgrades, don't skip
 		}
 
 		bot.purchaseListInReverseOrder = {}
@@ -496,6 +505,7 @@ function ItemPurchaseThink()
 			item_aegis = true, item_rapier = true, item_gem = true,
 			item_cheese = true, item_refresher_shard = true,
 			item_moon_shard = true, item_tpscroll = true,
+			item_famango = true, item_great_famango = true, item_greater_famango = true,
 		}
 
 		-- Collect sellable items sorted by cost (cheapest first)
@@ -552,6 +562,72 @@ function ItemPurchaseThink()
 		bot.currBuyingRequiredCounts = nil
 		bot.rebuildCount = 0
 		bot.countInvCheck = 0
+	end
+
+	-- Detect position swap from !pos command: rebuild purchase list for new role
+	if bot.needPurchaseRebuild then
+		bot.needPurchaseRebuild = nil
+		local nNewPos = J.GetPosition(bot)
+		print("[PosSwap] Item purchase rebuild for "..botName.." -> pos"..nNewPos)
+
+		-- Reload BotBuild to get new role's item list
+		local heroFile = string.gsub(botName, "npc_dota_", "")
+		local ok, newBuild = pcall(dofile, GetScriptDirectory().."/BotLib/"..heroFile)
+		if ok and newBuild ~= nil and newBuild['sBuyList'] ~= nil then
+			BotBuild = newBuild
+			sPurchaseList = newBuild['sBuyList']
+			sItemSellList = newBuild['sSellList']
+		end
+
+		-- Rebuild purchase list, skipping:
+		-- 1. Items the bot already owns (final item in inventory)
+		-- 2. Items whose ALL components the bot already has (final item effectively built)
+		-- 3. Duplicate boots if bot already has boots
+		if sPurchaseList then
+			local bHasBoots = Item.HasBuyBoots(bot)
+				or Item.HasItem(bot, 'item_guardian_greaves')
+				or Item.HasItem(bot, 'item_travel_boots')
+				or Item.HasItem(bot, 'item_travel_boots_2')
+				or Item.HasItem(bot, 'item_boots_of_bearing')
+			local tSkipBoots = {
+				item_boots = true, item_phase_boots = true, item_power_treads = true,
+				item_tranquil_boots = true, item_arcane_boots = true,
+				-- greaves/bearing/travel are intentional upgrades, don't skip
+			}
+
+			bot.purchaseListInReverseOrder = {}
+			local idx = 0
+			for i = #sPurchaseList, 1, -1 do
+				local itemName = sPurchaseList[i]
+				local bSkip = false
+
+				-- Already own it
+				if Item.IsItemInHero(itemName) then
+					bSkip = true
+				-- Duplicate boots
+				elseif bHasBoots and tSkipBoots[itemName] then
+					bSkip = true
+				-- Early game items past laning (same as ARDM)
+				elseif DotaTime() > 10 * 60 and tARDMNeverRebuy[itemName] then
+					bSkip = true
+				end
+
+				if not bSkip then
+					idx = idx + 1
+					bot.purchaseListInReverseOrder[idx] = itemName
+				end
+			end
+		end
+
+		-- Reset purchase state machine
+		bot.currBuyingItemInPurchaseList = nil
+		bot.currBuyingBasicItem = nil
+		bot.currBuyingBasicItemList = {}
+		bot.currBuyingBasicItemRefList = {}
+		bot.currBuyingRequiredCounts = nil
+		bot.rebuildCount = 0
+		bot.countInvCheck = 0
+		print("[PosSwap] Purchase list rebuilt with "..#bot.purchaseListInReverseOrder.." items")
 	end
 
 	if bot.lastItemPurchaseFrameProcessTime == nil then bot.lastItemPurchaseFrameProcessTime = currentTime end
@@ -939,6 +1015,45 @@ function ItemPurchaseThink()
 		end
 	end
 
+	-- Ward slot management for supports (pos 4/5):
+	-- Move wards to backpack when not actively warding to free up a main slot.
+	-- Move them back to main inventory when entering ward mode.
+	if J.GetPosition(bot) >= 4 and currentTime > (bot._lastWardSwapTime or 0) + 3 then
+		local bIsWarding = botMode == BOT_MODE_WARD
+		local tWardNames = { 'item_ward_observer', 'item_ward_sentry', 'item_ward_dispenser' }
+
+		for _, wardName in ipairs(tWardNames) do
+			local wardSlot = bot:FindItemSlot(wardName)
+			if wardSlot >= 0 then
+				if bIsWarding then
+					-- Move ward from backpack (6-8) to main inventory if there's a free slot
+					if wardSlot >= 6 and wardSlot <= 8 then
+						for mainSlot = 0, 5 do
+							local mainItem = bot:GetItemInSlot(mainSlot)
+							if mainItem == nil then
+								bot:ActionImmediate_SwapItems(wardSlot, mainSlot)
+								bot._lastWardSwapTime = currentTime
+								break
+							end
+						end
+					end
+				else
+					-- Move ward from main inventory (0-5) to backpack if backpack has space
+					if wardSlot >= 0 and wardSlot <= 5 then
+						for bpSlot = 6, 8 do
+							local bpItem = bot:GetItemInSlot(bpSlot)
+							if bpItem == nil then
+								bot:ActionImmediate_SwapItems(wardSlot, bpSlot)
+								bot._lastWardSwapTime = currentTime
+								break
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
 	if ( GetGameMode() ~= 23 and botLevel > 6 and currentTime > bot.fullInvCheck + 1.0
 		and (botDistanceFromFountain <= 200 or bot:DistanceFromSecretShop() <= 200 ))
 		or ( GetGameMode() == 23 and botLevel > 9 and currentTime > bot.fullInvCheck + 1.0 )
@@ -1046,21 +1161,20 @@ function ItemPurchaseThink()
 		return
 	end
 
-	-- All boots types (excluding travel boots which involve selling old boots to upgrade)
-	local tAllBoots = {
-		item_boots = true, item_phase_boots = true, item_power_treads = true,
-		item_tranquil_boots = true, item_arcane_boots = true,
-		item_guardian_greaves = true, item_boots_of_bearing = true,
+	-- Only skip raw boots of speed when we already have ANY boots.
+	-- All upgraded boots (treads, phase, arcane, tranquil, greaves, travel,
+	-- bearing) are intentional build items and must NEVER be skipped.
+	local tRawBootsOnly = {
+		item_boots = true,
 	}
 
 	if bot.currBuyingItemInPurchaseList == nil
 	and #bot.currBuyingBasicItemList == 0
 	then
-		-- Skip items that shouldn't be purchased (e.g. duplicate boots)
+		-- Skip duplicate basic boots (not upgrades like greaves/travel/bearing)
 		while #bot.purchaseListInReverseOrder > 0 do
 			local nextItem = bot.purchaseListInReverseOrder[#bot.purchaseListInReverseOrder]
-			-- Skip boots if we already have any boots (except travel boots upgrade)
-			if tAllBoots[nextItem] and (Item.HasBuyBoots(bot)
+			if tRawBootsOnly[nextItem] and (Item.HasBuyBoots(bot)
 				or Item.HasItem(bot, 'item_guardian_greaves')
 				or Item.HasItem(bot, 'item_travel_boots')
 				or Item.HasItem(bot, 'item_travel_boots_2')

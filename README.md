@@ -75,13 +75,13 @@ Customize picks, bans, and roles in [Customize/general.lua](bots/Customize/gener
 
 ## Game Modes
 
-Supports most game modes. See [full compatibility discussion](https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/72).
+Supports most game modes (10+) . See [full compatibility discussion](https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/72).
 
-ARDM (All Random Deathmatch) has dedicated support:
-- Bots detect hero swaps and reload ability/item builds
-- Stale hero detection prevents dead heroes from buying back or using abilities
-- Item inventory is cleaned up after hero swap (sells orphaned components, keeps valuable items)
-- Skill lists rebuild dynamically if abilities aren't ready after respawn
+---
+
+## Offline / LAN Play
+
+You can start a bot game directly from the console without network or clicking UI buttons — useful for offline play, LAN parties, or quick testing. See [play offline setup guide](https://github.com/forest0xia/dota2bot-OpenHyperAI/discussions/135).
 
 ---
 

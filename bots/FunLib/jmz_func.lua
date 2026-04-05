@@ -3537,6 +3537,136 @@ function J.CanIgnoreLowHp(bot)
 	or J.GetModifierTime(bot, 'modifier_oracle_false_promise_timer') > 0.6
 end
 
+-- Per-bot chase fatigue tracking.
+-- NOTE: Each bot runs in its own Lua sandbox, so module-level state is per-bot only.
+-- Cross-bot coordination uses Valve API (GetAttackTarget, GetActiveMode) not shared Lua state.
+
+-- Score an enemy for target prioritization. Higher score = better target.
+-- Uses Valve API for cross-bot coordination (ally:GetAttackTarget()).
+-- Per-bot state (chase fatigue) stored on bot handle to survive across ticks.
+function J.ScoreEnemyTarget(bot, enemy, alliesNearby)
+	if not J.IsValidHero(enemy) or not J.CanBeAttacked(enemy) or J.IsSuspiciousIllusion(enemy) then
+		return -1
+	end
+	if J.CannotBeKilled(bot, enemy) then return -1 end
+	if J.HasForbiddenModifier(enemy) then return -1 end
+
+	-- Skip enemies in dangerous defensive states
+	if enemy:HasModifier('modifier_abaddon_borrowed_time')
+	or enemy:HasModifier('modifier_item_aeon_disk_buff')
+	or enemy:HasModifier('modifier_ursa_enrage')
+	or enemy:HasModifier('modifier_troll_warlord_battle_trance')
+	or enemy:HasModifier('modifier_winter_wyvern_cold_embrace')
+	then
+		return -1
+	end
+
+	local score = 0
+	local dist = GetUnitToUnitDistance(bot, enemy)
+	local enemyHP = J.GetHP(enemy)
+
+	-- 1. Killability: low HP enemies are highest priority
+	score = score + (1 - enemyHP) * 50
+
+	-- 2. Offensive threat: dangerous enemies should be dealt with
+	local offPower = enemy:GetRawOffensivePower()
+	score = score + math.min(offPower / 100, 20)
+
+	-- 3. Distance penalty: prefer closer targets
+	score = score - (dist / 200)
+
+	-- 4. Ally focus bonus: query Valve API for what allies are attacking (works cross-sandbox)
+	local allyAttackingCount = 0
+	if alliesNearby then
+		for _, ally in pairs(alliesNearby) do
+			if J.IsValidHero(ally) and ally ~= bot then
+				local allyTarget = ally:GetAttackTarget()
+				if allyTarget == enemy then
+					allyAttackingCount = allyAttackingCount + 1
+				end
+			end
+		end
+	end
+	score = score + allyAttackingCount * 12
+
+	-- 5. Core/support priority: prefer killing supports (squishier, high-value disables)
+	--    but also weight high-threat cores that are low HP
+	if J.IsCore(enemy) then
+		score = score + 5  -- slight bonus for removing core damage
+	else
+		score = score + 8  -- supports are easier kills, remove their disables
+	end
+
+	-- 6. Chase fatigue: per-bot tracking stored on bot handle
+	if bot._chaseFatigue == nil then bot._chaseFatigue = {} end
+	local enemyID = enemy:GetPlayerID()
+	if enemyID and bot._chaseFatigue[enemyID] then
+		local fatigue = bot._chaseFatigue[enemyID]
+		local chaseDuration = DotaTime() - fatigue.startTime
+		-- If chasing for over 4 seconds and enemy HP hasn't dropped much, apply penalty
+		if chaseDuration > 4 and enemyHP > 0.5 then
+			score = score - chaseDuration * 2
+		end
+		-- If enemy is moving away (distance increasing), more penalty
+		if fatigue.lastDist and dist > fatigue.lastDist + 50 then
+			score = score - 8
+		end
+	end
+
+	-- 7. Bonus if enemy is dealing damage to us — don't ignore threats hitting us
+	if bot:WasRecentlyDamagedByHero(enemy, 2.0) then
+		score = score + 18
+	end
+
+	-- 8. Blade mail penalty
+	if J.GetModifierTime(enemy, "modifier_item_blade_mail_reflect") > 0.2 then
+		score = score - 30
+	end
+
+	return score
+end
+
+-- Pick the best target for coordinated focus. Returns the best enemy to attack, or nil.
+-- Cross-bot coordination happens naturally: all bots running the same scoring algorithm
+-- with the same Valve API inputs (ally:GetAttackTarget()) will converge on the same target.
+function J.GetBestTeamTarget(bot, enemyHeroes, allyHeroes)
+	if not enemyHeroes or #enemyHeroes == 0 then return nil end
+
+	local bestTarget = nil
+	local bestScore = -999
+
+	for _, enemy in pairs(enemyHeroes) do
+		local score = J.ScoreEnemyTarget(bot, enemy, allyHeroes)
+		if score > bestScore then
+			bestScore = score
+			bestTarget = enemy
+		end
+	end
+
+	-- Update per-bot chase fatigue tracking
+	if bot._chaseFatigue == nil then bot._chaseFatigue = {} end
+	if bestTarget then
+		local targetID = bestTarget:GetPlayerID()
+		if targetID then
+			local dist = GetUnitToUnitDistance(bot, bestTarget)
+			if not bot._chaseFatigue[targetID] then
+				bot._chaseFatigue[targetID] = { startTime = DotaTime(), lastDist = dist }
+			else
+				bot._chaseFatigue[targetID].lastDist = dist
+			end
+		end
+	end
+
+	-- Clean up stale fatigue entries
+	for id, fatigue in pairs(bot._chaseFatigue) do
+		if DotaTime() - fatigue.startTime > 10 then
+			bot._chaseFatigue[id] = nil
+		end
+	end
+
+	return bestTarget
+end
+
 function J.CanBeAttacked( unit )
 	return  unit ~= nil
 			and not J.HasForbiddenModifier( unit )
@@ -5812,6 +5942,9 @@ function J.IsStaleARDMHero(cachedBot, cachedName)
 
 	return false, freshBot, freshName
 end
+
+-- Push safety and defend priority logic moved to TS sources:
+-- aba_push.ts (GetPushDesireHelper) and aba_defend.ts (GetDefendDesireHelper)
 
 function J.ModeAnnounce(bot, locKey, cooldown)
 	local Localization = require( GetScriptDirectory()..'/FunLib/localization' )

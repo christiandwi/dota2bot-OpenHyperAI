@@ -355,12 +355,13 @@ function X.ConsiderStickyBomb()
         end
 	end
 
-    if J.IsFarming(bot)
+    if J.IsFarming(bot) and J.GetManaAfter(StickyBomb:GetManaCost()) > 0.3
     then
         local nNeutralCreeps = bot:GetNearbyNeutralCreeps(nCastRange)
         if nNeutralCreeps ~= nil
         then
-            if #nNeutralCreeps >= 1
+            if #nNeutralCreeps >= 2
+            or (#nNeutralCreeps >= 1 and J.IsValid(nNeutralCreeps[1]) and nNeutralCreeps[1]:IsAncientCreep())
             then
                 return BOT_ACTION_DESIRE_HIGH, nNeutralCreeps[1]:GetLocation()
             end
@@ -369,9 +370,9 @@ function X.ConsiderStickyBomb()
         local nEnemyLaneCreeps = bot:GetNearbyLaneCreeps(nCastRange, true)
         if nEnemyLaneCreeps ~= nil
         then
-            if #nEnemyLaneCreeps >= 1
+            if #nEnemyLaneCreeps >= 3
             then
-                return BOT_ACTION_DESIRE_HIGH, nEnemyLaneCreeps[1]:GetLocation()
+                return BOT_ACTION_DESIRE_HIGH, J.GetCenterOfUnits(nEnemyLaneCreeps)
             end
         end
     end
@@ -840,6 +841,7 @@ function X.ConsiderProximityMines()
     end
 
     if J.IsFarming(bot)
+    and J.GetManaAfter(nPManaCost) > 0.3
     then
         local nNeutralCreeps = bot:GetNearbyNeutralCreeps(nAffectRange)
         if nNeutralCreeps ~= nil

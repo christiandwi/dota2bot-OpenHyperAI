@@ -144,6 +144,8 @@ local WarpFlare             = bot:GetAbilityByName('tinker_warp_grenade')
 local KeenConveyance        = bot:GetAbilityByName('tinker_keen_teleport')
 local Rearm                 = bot:GetAbilityByName('tinker_rearm')
 
+local lastMarchCastTime     = -999
+
 local LaserDesire, LaserTarget
 -- local HeatSeekingMissileDesire
 local MarchOfTheMachinesDesire, MarchOfTheMachinesLocation
@@ -176,6 +178,16 @@ function X.SkillsComplement()
         bot.healInBase = false
     end
 
+    -- Re-fetch ability handles each tick for safety against Aghs upgrades
+    Laser = bot:GetAbilityByName('tinker_laser')
+    MarchOfTheMachines = bot:GetAbilityByName('tinker_march_of_the_machines')
+    DeployTurrets = bot:GetAbilityByName('tinker_deploy_turrets')
+                    or bot:GetAbilityByName('tinker_defense_matrix')
+                    or (sAbilityList[3] and bot:GetAbilityByName(sAbilityList[3]))
+    WarpFlare = bot:GetAbilityByName('tinker_warp_grenade')
+    KeenConveyance = bot:GetAbilityByName('tinker_keen_teleport')
+    Rearm = bot:GetAbilityByName('tinker_rearm')
+
     if J.CanNotUseAbility(bot)
     or Rearm ~= nil and Rearm:IsInAbilityPhase()
     or KeenConveyance ~= nil and KeenConveyance:IsInAbilityPhase()
@@ -185,6 +197,7 @@ function X.SkillsComplement()
         return
     end
 
+    -- Cache per-tick variables
     botTarget = J.GetProperTarget(bot)
 
     if not J.IsGoingOnSomeone(bot)
@@ -221,6 +234,7 @@ function X.SkillsComplement()
     if MarchOfTheMachinesDesire > 0
     then
         bot:Action_UseAbilityOnLocation(MarchOfTheMachines, MarchOfTheMachinesLocation)
+        lastMarchCastTime = DotaTime()
         return
     end
 
@@ -287,6 +301,36 @@ function X.ConsiderLaser()
         and not enemyHero:HasModifier('modifier_oracle_false_promise_timer')
         then
             return BOT_ACTION_DESIRE_HIGH, enemyHero
+        end
+    end
+
+    -- Teamfight: blind the highest DPS enemy
+    if J.IsInTeamFight(bot, 1200)
+    then
+        local bestTarget = nil
+        local bestDPS = 0
+
+        for _, enemyHero in pairs(nEnemyHeroes)
+        do
+            if J.IsValidHero(enemyHero)
+            and J.IsInRange(bot, enemyHero, nCastRange)
+            and J.CanCastOnNonMagicImmune(enemyHero)
+            and J.CanCastOnTargetAdvanced(enemyHero)
+            and not J.IsMeepoClone(enemyHero)
+            and not enemyHero:HasModifier('modifier_abaddon_borrowed_time')
+            then
+                local currDPS = enemyHero:GetAttackDamage() * enemyHero:GetAttackSpeed()
+                if currDPS > bestDPS
+                then
+                    bestDPS = currDPS
+                    bestTarget = enemyHero
+                end
+            end
+        end
+
+        if bestTarget ~= nil
+        then
+            return BOT_ACTION_DESIRE_HIGH, bestTarget
         end
     end
 
@@ -474,6 +518,12 @@ function X.ConsiderMarchOfTheMachines()
     local nDuration = MarchOfTheMachines:GetSpecialValueInt('duration')
     local nDamage = MarchOfTheMachines:GetSpecialValueInt('damage')
 
+    -- Overlap prevention: don't recast if previous March is still covering the area
+    if DotaTime() < lastMarchCastTime + nDuration / 2
+    then
+        return BOT_ACTION_DESIRE_NONE, 0
+    end
+
     local nEnemyHeroes = J.GetNearbyHeroes(bot,1600, true, BOT_MODE_NONE)
 
     for _, enemyHero in pairs(nEnemyHeroes)
@@ -593,7 +643,15 @@ function X.ConsiderDeployTurrets()
     end
 
     local nCastRange = J.GetProperCastRange(false, bot, DeployTurrets:GetCastRange())
+    local nManaCost = DeployTurrets:GetManaCost()
     local nEnemyHeroes = J.GetNearbyHeroes(bot, 1600, true, BOT_MODE_NONE)
+
+    -- Mana management: reserve mana for Rearm + TP combo (exception: always deploy in teamfight)
+    if not J.IsInTeamFight(bot, 1200)
+    and J.GetManaAfter(nManaCost) < 0.25
+    then
+        return BOT_ACTION_DESIRE_NONE, nil
+    end
 
     -- When going on someone: deploy turrets at the target's location
     if J.IsGoingOnSomeone(bot)

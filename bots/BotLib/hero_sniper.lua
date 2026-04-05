@@ -396,20 +396,17 @@ function X.ConsiderQ()
 		end
 	end
 
-	if bot:GetActiveMode() == BOT_MODE_ROSHAN
+	if J.IsDoingRoshan( bot )
 	then
 		local nAttackTarget = bot:GetAttackTarget()
 		if J.IsValid( nAttackTarget )
-			and J.GetHP( nAttackTarget ) > 0.5
-			and J.IsInRange( nAttackTarget, bot, 600 )
+			and J.IsRoshan( nAttackTarget )
+			and J.IsInRange( nAttackTarget, bot, nCastRange )
+			and J.GetManaAfter( abilityQ:GetManaCost() ) > 0.4
 			and not nAttackTarget:HasModifier( "modifier_sniper_shrapnel_slow" )
 			and not X.IsAbiltyQCastedHere( nAttackTarget:GetLocation(), nRadius )
 		then
-			local nAllies = J.GetNearbyHeroes(bot, 800, false, BOT_MODE_ROSHAN )
-			if #nAllies >= 4
-			then
-				return BOT_ACTION_DESIRE_HIGH, nAttackTarget:GetLocation()
-			end
+			return BOT_ACTION_DESIRE_HIGH, nAttackTarget:GetLocation()
 		end
 	end
 
@@ -421,6 +418,24 @@ function X.ConsiderQ()
 		and not botTarget:HasModifier( "modifier_sniper_shrapnel_slow" )
 		then
 			return BOT_ACTION_DESIRE_HIGH, botTarget:GetLocation()
+		end
+	end
+
+	--farming: shrapnel neutral creep camps with 3+ creeps (conserve charges, higher mana threshold)
+	if J.IsFarming( bot )
+		and #hEnemyHeroList == 0
+		and J.GetManaAfter( abilityQ:GetManaCost() ) > 0.4
+		and abilityQ:GetCurrentCharges() >= 2
+	then
+		local nNeutralCreeps = bot:GetNearbyNeutralCreeps( nCastRange )
+		if #nNeutralCreeps >= 3
+		then
+			local nFarmAoE = bot:FindAoELocation( true, false, botLocation, nCastRange, nRadius, 0.8, 0 )
+			if nFarmAoE.count >= 3
+				and not X.IsAbiltyQCastedHere( nFarmAoE.targetloc, nRadius )
+			then
+				return BOT_ACTION_DESIRE_HIGH, nFarmAoE.targetloc
+			end
 		end
 	end
 
